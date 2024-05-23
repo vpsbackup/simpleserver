@@ -17,6 +17,9 @@ var FlagTcping6 = flag.Bool("t6", true, "tcping IPv6")
 var FlagV = flag.Bool("v", false, "version")
 var FlagMock = flag.Bool("mock", false, "is mock")
 var FlagTracer = flag.Bool("tr", false, "enable tracer")
+var FlagV4Fn = flag.String("v4fn", "v4.txt", "ipv4 file name")
+var FlagV6Fn = flag.String("v6fn", "v6.txt", "ipv6 file name")
+var FlagEnableView = flag.Bool("ev", false, "enable view info")
 
 func main() {
 	flag.Parse()
@@ -29,6 +32,10 @@ func main() {
 	log.Println("Tcping6:", *FlagTcping6)
 	log.Println("V:", *FlagV)
 	log.Println("IsMock:", *FlagMock)
+	log.Println("Tracer:", *FlagTracer)
+	log.Println("V4Fn:", *FlagV4Fn)
+	log.Println("V6Fn:", *FlagV6Fn)
+	log.Println("EnableView:", *FlagEnableView)
 
 	if *FlagV {
 		Version()
@@ -41,6 +48,15 @@ func main() {
 	if *FlagTcping {
 		RunTcping()
 		mux.Handle("/metrics", promhttp.Handler())
+	}
+
+	if *FlagEnableView {
+		vs := InitView(*FlagV4Fn, *FlagV6Fn)
+		if vs == nil {
+			log.Println("bad view file")
+			return
+		}
+		mux.HandleFunc("/ip/", vs.Handle)
 	}
 
 	if *FlagMsg {
