@@ -51,12 +51,12 @@ func main() {
 	}
 
 	if *FlagEnableView {
-		vs := InitView(*FlagV4Fn, *FlagV6Fn)
-		if vs == nil {
+		err := InitView(*FlagV4Fn, *FlagV6Fn)
+		if err != nil {
 			log.Println("bad view file")
 			return
 		}
-		mux.HandleFunc("/ip/", vs.Handle)
+		mux.HandleFunc("/ip/", GlobalViewService.Handle)
 	}
 
 	if *FlagMsg {

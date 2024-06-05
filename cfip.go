@@ -35,15 +35,30 @@ func CFIPHandler(w http.ResponseWriter, r *http.Request) {
 	ii.Key = "X-Server"
 	ii.Value = "iPhone 8 Plus"
 	kvList = append([]IPInfo{ii}, kvList...)
+
 	ii.Key = "X-Remote-IP"
-	ii.Value = r.RemoteAddr
+	ipStr := r.RemoteAddr
 	if *FlagBehindNginx {
-		ii.Value = r.Header.Get("X-Real-Ip")
+		ipStr = r.Header.Get("X-Real-Ip")
 	}
+	ii.Value = ipStr
 	kvList = append([]IPInfo{ii}, kvList...)
+
+	view, _ := GlobalViewService.Find(ipStr)
+	ii.Key = "X-IP-View"
+	ii.Value = view
+	kvList = append([]IPInfo{ii}, kvList...)
+
 	ii.Key = "X-time"
 	ii.Value = time.Now().Format("2006-01-02T15:04:05 -07:00:00")
 	kvList = append([]IPInfo{ii}, kvList...)
+
+	if IsCurl(r) {
+		for _, kv := range kvList {
+			w.Write([]byte(kv.Key + ": " + kv.Value + "\n"))
+		}
+		return
+	}
 
 	if r.Method != "GET" {
 		bt, _ := json.Marshal(kvList)
