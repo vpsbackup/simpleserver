@@ -6,7 +6,10 @@ import (
 )
 
 // 100m
-const MaxHTTPPayload = 100 * 1024 * 1024
+var MaxHTTPPayload = int64(100 * 1024 * 1024)
+
+// 10g
+var MaxTotalFileSize = int64(10 * 1024 * 1024 * 1024)
 
 var uploadService *UploaderService
 
@@ -33,6 +36,7 @@ func Uploader(w http.ResponseWriter, r *http.Request) {
 			localDir,
 			"https://"+*FlagDomain+"/upload",
 			MaxHTTPPayload,
+			MaxTotalFileSize,
 			NeverExpire, 5)
 	}
 

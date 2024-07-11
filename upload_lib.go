@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	dio "github.com/dilfish/tools/io"
 	"io"
 	"log"
@@ -68,7 +69,8 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	if u.Curr+header.Size > u.MaxSize {
 		log.Println("too many write", "curr", u.Curr, "size", header.Size, "max size", u.MaxSize)
-		io.WriteString(w, "Too many write")
+		msg := fmt.Sprintf("curr: %u, max: %u", u.Curr, u.MaxSize)
+		io.WriteString(w, "Too many write: "+msg)
 		return
 	}
 	defer file.Close()
@@ -92,9 +94,9 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func NewUploadService(baseURL, basePath, jump string, maxSize int64, expire time.Duration, nameLen int) *UploaderService {
+func NewUploadService(baseURL, basePath, jump string, maxSize, maxTotal int64, expire time.Duration, nameLen int) *UploaderService {
 	var u UploaderService
-	u.MaxSize = maxSize
+	u.MaxSize = maxTotal
 	u.MaxMem = maxSize
 	u.BasePath = basePath
 	u.BaseURL = baseURL

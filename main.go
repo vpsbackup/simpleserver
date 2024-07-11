@@ -10,7 +10,7 @@ import (
 
 var FlagBehindNginx = flag.Bool("bn", true, "behind nginx")
 var FlagPort = flag.Int("p", 10080, "port number")
-var FlagDomain = flag.String("d", "lig.dev.ug", "domain name in upload")
+var FlagDomain = flag.String("d", "x.871116.xyz", "domain name in upload")
 var FlagTcping = flag.Bool("t", false, "tcping")
 var FlagMsg = flag.Bool("m", false, "message service")
 var FlagTcping6 = flag.Bool("t6", true, "tcping IPv6")
@@ -20,6 +20,8 @@ var FlagTracer = flag.Bool("tr", false, "enable tracer")
 var FlagV4Fn = flag.String("v4fn", "v4.txt", "ipv4 file name")
 var FlagV6Fn = flag.String("v6fn", "v6.txt", "ipv6 file name")
 var FlagEnableView = flag.Bool("ev", false, "enable view info")
+var FlagMaxSingleFile = flag.Int64("msf", 100, "max single file MB")
+var FlagMaxTotalFile = flag.Int64("mtf", 10, "max total file in GB")
 
 func main() {
 	flag.Parse()
@@ -36,6 +38,15 @@ func main() {
 	log.Println("V4Fn:", *FlagV4Fn)
 	log.Println("V6Fn:", *FlagV6Fn)
 	log.Println("EnableView:", *FlagEnableView)
+	log.Println("MaxSingleFileMB:", *FlagMaxSingleFile)
+	log.Println("MaxTotalFileGB:", *FlagMaxTotalFile)
+
+	if *FlagMaxSingleFile*1024*1024 > MaxHTTPPayload {
+		MaxHTTPPayload = *FlagMaxSingleFile * 1024 * 1024
+	}
+	if *FlagMaxTotalFile*1024*1024*1024 > MaxTotalFileSize {
+		MaxTotalFileSize = *FlagMaxTotalFile * 1024 * 1024 * 1024
+	}
 
 	if *FlagV {
 		Version()
