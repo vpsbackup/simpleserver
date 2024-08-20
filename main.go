@@ -22,6 +22,7 @@ var FlagV6Fn = flag.String("v6fn", "v6.txt", "ipv6 file name")
 var FlagEnableView = flag.Bool("ev", false, "enable view info")
 var FlagMaxSingleFile = flag.Int64("msf", 100, "max single file MB")
 var FlagMaxTotalFile = flag.Int64("mtf", 10, "max total file in GB")
+var FlagPeers = flag.String("peer", "", "domains with comma seperated")
 
 func main() {
 	flag.Parse()
@@ -40,6 +41,7 @@ func main() {
 	log.Println("EnableView:", *FlagEnableView)
 	log.Println("MaxSingleFileMB:", *FlagMaxSingleFile)
 	log.Println("MaxTotalFileGB:", *FlagMaxTotalFile)
+	log.Println("Peers:", *FlagPeers)
 
 	if *FlagMaxSingleFile*1024*1024 > MaxHTTPPayload {
 		MaxHTTPPayload = *FlagMaxSingleFile * 1024 * 1024
@@ -52,6 +54,8 @@ func main() {
 		Version()
 		return
 	}
+
+	InitPeers()
 
 	var mux MuxService
 	mux.Mux = http.ServeMux{}
@@ -87,6 +91,8 @@ func main() {
 	mux.HandleFunc("/ip", CFIPHandler)
 	mux.HandleFunc("/memfile/", MemFileHandler)
 	mux.HandleFunc("/vnstat", VnstatHandler)
+	mux.HandleFunc("/vnstat.all", VnstatAllHandler)
+	mux.HandleFunc("/api/", ApiHandler)
 	mux.HandleFunc("/upload", Uploader)
 
 	mux.Handle("/", http.FileServer(http.Dir("./")))

@@ -138,6 +138,10 @@ type PageStruct struct {
 	TrafficList []PageTraffic
 }
 
+type PageList struct {
+	List []PageStruct
+}
+
 func PrintVnstat(v *Vnstat) PageStruct {
 	var ps PageStruct
 	// ps.InfoList = append(ps.InfoList, PageInfo{Key: "vnstat version", Value: v.VnstatVersion})
@@ -147,6 +151,7 @@ func PrintVnstat(v *Vnstat) PageStruct {
 		if intf.Alias != "" {
 			name = name + "(" + intf.Alias + ")"
 		}
+		ps.InfoList = append(ps.InfoList, PageInfo{Key: "box name", Value: *FlagDomain})
 		// ps.InfoList = append(ps.InfoList, PageInfo{Key: name + " created", Value: DateString(&intf.Created.Date)})
 		ps.InfoList = append(ps.InfoList, PageInfo{Key: name + " updated", Value: DateString(&intf.Updated.Date) + " " + TimeString(&intf.Updated.Time)})
 
@@ -250,25 +255,60 @@ func PrintVnstat(v *Vnstat) PageStruct {
 	return ps
 }
 
-func VnstatHandler(w http.ResponseWriter, r *http.Request) {
+func GetVnstat() (PageStruct, error) {
+	var data PageStruct
 	file, err := os.Open("vnstat.log")
 	if err != nil {
 		log.Println("open error:", err)
-		w.Write([]byte("no vnstat.log file"))
-		return
+		return data, err
 	}
 	defer file.Close()
 	bt, _ := io.ReadAll(file)
 	var vs Vnstat
 	json.Unmarshal(bt, &vs)
-	data := PrintVnstat(&vs)
+	data = PrintVnstat(&vs)
+	return data, nil
+}
+
+func VnstatHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := GetVnstat()
+	if err != nil {
+		log.Println("get vnstat error:", err)
+		w.Write([]byte("no vnstat.log file"))
+		return
+	}
+	var pl PageList
+	pl.List = append(pl.List, data)
 	t, err := template.ParseFiles("vnstat.html")
 	if err != nil {
 		log.Println("parse file error", err)
 		w.Write([]byte("no vnstat.html file"))
 		return
 	}
-	err = t.Execute(w, data)
+	err = t.Execute(w, pl)
+	if err != nil {
+		log.Println("execute error:", err)
+	}
+}
+
+func VnstatAllHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := GetVnstat()
+	if err != nil {
+		log.Println("get vnstat error:", err)
+		w.Write([]byte("no vnstat.log file"))
+		return
+	}
+	var pl PageList
+	pl.List = append(pl.List, data)
+	peer := PeersGetVnstat()
+	pl.List = append(pl.List, peer...)
+	t, err := template.ParseFiles("vnstat.html")
+	if err != nil {
+		log.Println("parse file error", err)
+		w.Write([]byte("no vnstat.html file"))
+		return
+	}
+	err = t.Execute(w, pl)
 	if err != nil {
 		log.Println("execute error:", err)
 	}
