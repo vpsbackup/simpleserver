@@ -24,6 +24,7 @@ var FlagMaxSingleFile = flag.Int64("msf", 100, "max single file MB")
 var FlagMaxTotalFile = flag.Int64("mtf", 10, "max total file in GB")
 var FlagPeers = flag.String("peer", "", "domains with comma seperated")
 var FlagUdpPort = flag.Int("up", 10081, "udp listen port number")
+var FlagTcpPort = flag.Int("tp", 10082, "tcp listen port number")
 
 func main() {
 	flag.Parse()
@@ -44,6 +45,7 @@ func main() {
 	log.Println("MaxTotalFileGB:", *FlagMaxTotalFile)
 	log.Println("Peers:", *FlagPeers)
 	log.Println("Udp Port:", *FlagUdpPort)
+	log.Println("Tcp Port:", *FlagTcpPort)
 
 	if *FlagMaxSingleFile*1024*1024 > MaxHTTPPayload {
 		MaxHTTPPayload = *FlagMaxSingleFile * 1024 * 1024
@@ -59,6 +61,9 @@ func main() {
 
 	if *FlagUdpPort != 0 {
 		go ListenUDP(*FlagUdpPort)
+	}
+	if *FlagTcpPort != 0 {
+		go ListenTCP(*FlagTcpPort)
 	}
 
 	InitPeers()
