@@ -23,6 +23,7 @@ var FlagEnableView = flag.Bool("ev", false, "enable view info")
 var FlagMaxSingleFile = flag.Int64("msf", 100, "max single file MB")
 var FlagMaxTotalFile = flag.Int64("mtf", 10, "max total file in GB")
 var FlagPeers = flag.String("peer", "", "domains with comma seperated")
+var FlagUdpPort = flag.Int("up", 10081, "udp listen port number")
 
 func main() {
 	flag.Parse()
@@ -53,6 +54,10 @@ func main() {
 	if *FlagV {
 		Version()
 		return
+	}
+
+	if *FlagUdpPort != 0 {
+		go ListenUDP(*FlagUdpPort)
 	}
 
 	InitPeers()
