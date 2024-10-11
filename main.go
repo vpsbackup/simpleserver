@@ -43,6 +43,7 @@ func main() {
 	log.Println("MaxSingleFileMB:", *FlagMaxSingleFile)
 	log.Println("MaxTotalFileGB:", *FlagMaxTotalFile)
 	log.Println("Peers:", *FlagPeers)
+	log.Println("Udp Port:", *FlagUdpPort)
 
 	if *FlagMaxSingleFile*1024*1024 > MaxHTTPPayload {
 		MaxHTTPPayload = *FlagMaxSingleFile * 1024 * 1024
