@@ -153,7 +153,7 @@ func GetUploadPage(title, path string) string {
 	var middle = `</title>
 
     <!-- Bootstrap core CSS -->
-    <link href="https://` + *FlagDomain + `/302/bootstrap.css" rel="stylesheet">
+    <link href="/302/bootstrap.css" rel="stylesheet">
 
   </head>
   <body>
@@ -178,8 +178,8 @@ func GetUploadPage(title, path string) string {
         </div>
     </main>
 
-    <script src="https://` + *FlagDomain + `/302/jquery.js"></script>
-    <script src="https://` + *FlagDomain + `/302/bootstrap.js"></script>
+    <script src="/302/jquery.js"></script>
+    <script src="/302/bootstrap.js"></script>
   </body>
 </html>
 `
