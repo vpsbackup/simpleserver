@@ -64,6 +64,7 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
+		log.Println("parse file error:", err)
 		io.WriteString(w, "Read File error:"+err.Error())
 		return
 	}

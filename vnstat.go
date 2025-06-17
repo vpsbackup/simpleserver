@@ -290,26 +290,3 @@ func VnstatHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println("execute error:", err)
 	}
 }
-
-func VnstatAllHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := GetVnstat()
-	if err != nil {
-		log.Println("get vnstat error:", err)
-		w.Write([]byte("no vnstat.log file"))
-		return
-	}
-	var pl PageList
-	pl.List = append(pl.List, data)
-	peer := PeersGetVnstat()
-	pl.List = append(pl.List, peer...)
-	t, err := template.ParseFiles("vnstat.html")
-	if err != nil {
-		log.Println("parse file error", err)
-		w.Write([]byte("no vnstat.html file"))
-		return
-	}
-	err = t.Execute(w, pl)
-	if err != nil {
-		log.Println("execute error:", err)
-	}
-}
