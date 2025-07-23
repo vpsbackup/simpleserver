@@ -82,7 +82,9 @@ func InitMux() (*MuxService, error) {
 		if MClient == nil {
 			return nil, errors.New("new mongo client error")
 		}
-		mux.HandleFunc("/t", GetMessagePage)
+		mux.HandleFunc("/t", CreateMsg)
+		mux.HandleFunc("/t/list", MsgList)
+		mux.HandleFunc("/t/list/", MsgShow)
 	}
 
 	if *FlagTracer {
