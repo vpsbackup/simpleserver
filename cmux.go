@@ -5,6 +5,7 @@ import (
 	dnet "github.com/dilfish/tools/net"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
+	"net"
 	"net/http"
 )
 
@@ -39,10 +40,20 @@ func (s *MuxService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		log.Println("split host port error:", r.RemoteAddr, err)
+	}
 	if r.ProtoMajor == 3 {
+		r.Header.Set("X-Real-Ip", host)
 		r.Header.Set("X-HTTP3-Enable", "true")
+		w.Header().Set("X-HTTP3-Enable", "true")
 	} else {
+		if !*FlagBehindNginx {
+			r.Header.Set("X-Real-Ip", host)
+		}
 		r.Header.Set("X-HTTP3-Enable", "false")
+		w.Header().Set("X-HTTP3-Enable", "false")
 	}
 	log.Println("request proto is:", r.Proto)
 	s.Mux.ServeHTTP(w, r)
@@ -71,9 +82,7 @@ func InitMux() (*MuxService, error) {
 		if MClient == nil {
 			return nil, errors.New("new mongo client error")
 		}
-		mux.HandleFunc("/t", CreateMsg)
-		mux.HandleFunc("/t/list", MsgList)
-		mux.HandleFunc("/t/list/", MsgShow)
+		mux.HandleFunc("/t", GetMessagePage)
 	}
 
 	if *FlagTracer {

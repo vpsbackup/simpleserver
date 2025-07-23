@@ -29,10 +29,12 @@ func main() {
 		return
 	}
 
-	if *FlagQuicOnly {
-		RunHTTP3(mux)
-	} else {
-		go RunHTTP3(mux)
+	if *FlagUseQuic {
+		if *FlagQuicOnly {
+			RunHTTP3(mux)
+		} else {
+			go RunHTTP3(mux)
+		}
 	}
 
 	addr := ":" + strconv.FormatUint(uint64(*FlagPort), 10)

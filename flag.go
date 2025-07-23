@@ -25,6 +25,7 @@ var FlagQuicAddr = flag.String("h3a", ":443", "quic listen addr")
 var FlagQuicCertPath = flag.String("h3c", "/root/sh/cert.pem", "tls cert file")
 var FlagQuicKeyPath = flag.String("h3p", "/root/sh/priv.pem", "tls cert file")
 var FlagQuicOnly = flag.Bool("h3o", false, "quic only")
+var FlagUseQuic = flag.Bool("h3e", true, "use quic")
 
 func ParseFlag() {
 	flag.Parse()
@@ -56,4 +57,5 @@ func ParseFlag() {
 	log.Println("Quic Cert Path:", *FlagQuicCertPath)
 	log.Println("Quic Key Path:", *FlagQuicKeyPath)
 	log.Println("Quic Only:", *FlagQuicOnly)
+	log.Println("Use Quic:", *FlagUseQuic)
 }

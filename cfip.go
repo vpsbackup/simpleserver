@@ -37,10 +37,7 @@ func CFIPHandler(w http.ResponseWriter, r *http.Request) {
 	kvList = append([]IPInfo{ii}, kvList...)
 
 	ii.Key = "X-Remote-IP"
-	ipStr := r.RemoteAddr
-	if *FlagBehindNginx {
-		ipStr = r.Header.Get("X-Real-Ip")
-	}
+	ipStr := r.Header.Get("X-Real-Ip")
 	ii.Value = ipStr
 	kvList = append([]IPInfo{ii}, kvList...)
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -11,94 +13,65 @@ import (
 )
 
 type Msg struct {
-	Id       string    `json:"_id" bson:"_id"`
-	Msg      string    `json:"msg" bson:"msg"`
-	CreateAt time.Time `json:"createAt" bson:"createAt"`
+	Id        string    `json:"_id" bson:"_id"`
+	Msg       string    `json:"msg" bson:"msg"`
+	CreateAt  time.Time `json:"createAt" bson:"createAt"`
+	Timestamp string    `json:"timestamp" bson:"-"`
 }
 
 // MsgList return list of message info
-// get only
 func MsgList(w http.ResponseWriter, r *http.Request) {
 	log.Println("request is:", r.Method, r.RequestURI)
-	if r.Method != http.MethodGet {
-		log.Println("bad method for msg list:", r.Method)
-		w.Write([]byte("bad method for msg list"))
-		return
-	}
+	list := msgList()
+	bt, _ := json.Marshal(list)
+	w.Write(bt)
+}
+
+func msgList() []Msg {
 	var list []Msg
 	cond := bson.M{}
 	err := MClient.Find(cond, &list)
 	if err != nil && err != mongo.ErrNilDocument {
 		log.Println("find msg error:", err)
-		w.Write([]byte("find msg error: " + err.Error()))
-		return
-	}
-	ht := "<html><head><title>Msg List</title></head><body><h1><div align=\"center\">"
-	if len(list) == 0 {
-		ht = ht + "Empty List"
+		return list
 	}
 	beijingLocation := time.FixedZone("CST", 8*60*60)
-	for _, l := range list {
-		ht = ht + "<a href=\"/t/list/" + l.Id + "\"> Info </a>, " + l.CreateAt.In(beijingLocation).String() + "<br>"
+	for idx, l := range list {
+		list[idx].Timestamp = l.CreateAt.In(beijingLocation).String()
 	}
-	ht = ht + "</div></h1></body></html>"
-	w.Write([]byte(ht))
-}
-
-// MsgShow return single message
-// get only
-func MsgShow(w http.ResponseWriter, r *http.Request) {
-	log.Println("request is:", r.Method, r.RequestURI)
-	if r.Method != http.MethodGet {
-		log.Println("bad method for msg show:", r.Method)
-		w.Write([]byte("bad method for msg show"))
-		return
-	}
-	msgId := r.RequestURI[len("/t/list/"):]
-	log.Println("msg show id:", msgId)
-	cond := bson.M{
-		"_id": msgId,
-	}
-	var msg []Msg
-	err := MClient.Find(cond, &msg)
-	if err != nil || len(msg) <= 0 {
-		log.Println("msg id:", msgId, err)
-		w.Write([]byte("no such msg id:" + msgId))
-		return
-	}
-	w.Write([]byte(msg[0].Msg))
+	return list
 }
 
 // CreateMsg get-> message input page
 // post-> new message
 func CreateMsg(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		r.ParseForm()
-		msg := r.Form["message"]
-		message := ""
-		if len(msg) > 0 {
-			message = msg[0]
-		}
-		if len(message) > 500000 || len(message) < 2 {
-			log.Println("empty msg form is:", r.Form)
-			w.Write([]byte("too long or short"))
-			return
-		}
-		var m Msg
-		m.Id = primitive.NewObjectID().Hex()
-		m.CreateAt = time.Now()
-		m.Msg = message
-		err := MClient.Insert(m)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-		} else {
-			http.Redirect(w, r, "/t/list/"+m.Id, 302)
-			return
-		}
+	defer r.Body.Close()
+	bt, _ := io.ReadAll(r.Body)
+	var msg Msg
+	err := json.Unmarshal(bt, &msg)
+	if err != nil {
+		log.Println("bad format:", len(bt), string(bt))
+		w.Write([]byte("bad format: " + err.Error()))
 		return
 	}
-	log.Println("get /t")
-	a, b := w.Write([]byte(GetMessagePage()))
-	log.Println("write done:", a, b)
+	if len(msg.Msg) > 50000 {
+		log.Println("too long:", len(msg.Msg))
+		w.Write([]byte("too long"))
+		return
+	}
+	msg.Id = primitive.NewObjectID().Hex()
+	msg.CreateAt = time.Now()
+	err = MClient.Insert(msg)
+	if err != nil {
+		log.Println("insert error:", err)
+		w.Write([]byte("insert error:" + err.Error()))
+		return
+	}
+	w.Write(bt)
 	return
+}
+
+func GetMessagePage(w http.ResponseWriter, r *http.Request) {
+	str := getMessagePage()
+	w.Write([]byte(str))
 }
