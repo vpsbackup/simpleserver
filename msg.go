@@ -55,6 +55,10 @@ func MsgShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msgId := r.RequestURI[len("/t/list/"):]
+	if len(msgId) < len("6874bfcd3a56fd69fb514e37") {
+		MsgList(w, r)	
+		return
+	}
 	log.Println("msg show id:", msgId)
 	cond := bson.M{
 		"_id": msgId,
