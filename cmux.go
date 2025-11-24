@@ -30,7 +30,12 @@ func (s *MuxService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.RequestURI != "/metrics" {
-		log.Println("request is:", r.Method, r.RequestURI)
+		ip := r.Header["X-Real-Ip"]
+		view := "未知"
+		if len(ip) != 0 && ip[0] != "" {
+			view, _ = GlobalViewService.Find(ip[0])
+		}
+		log.Println("request is:", r.Method, r.RequestURI, ip[0], view)
 		log.Println("headers are:", r.Header)
 	}
 	// for http3
