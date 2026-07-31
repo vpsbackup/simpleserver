@@ -17,7 +17,7 @@ func AgentProxy(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -40,11 +40,13 @@ func AgentProxy(w http.ResponseWriter, r *http.Request) {
 	proxy.Director = func(req *http.Request) {
 		req.URL.Scheme = u.Scheme
 		req.URL.Host = u.Host
-		// 将 /v1/agentproxy/xxx 映射到上游 /xxx
-		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/v1/agentproxy")
-		if req.URL.Path == "" {
-			req.URL.Path = "/"
+		// 将 /v1/agentproxy/xxx 映射到上游路径（保留上游 base 自带的路径前缀）
+		p := strings.TrimPrefix(req.URL.Path, "/v1/agentproxy")
+		if p == "" {
+			p = "/"
 		}
+		base := strings.TrimSuffix(u.Path, "/")
+		req.URL.Path = base + p
 		req.Host = u.Host
 	}
 	proxy.FlushInterval = 0 // 立即刷新，支持 SSE 流式输出
