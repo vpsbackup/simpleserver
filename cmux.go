@@ -101,6 +101,7 @@ func InitMux() (*MuxService, error) {
 	mux.HandleFunc("/vnstat", VnstatHandler)
 	mux.HandleFunc("/api/", ApiHandler)
 	mux.HandleFunc("/upload", Uploader)
+	mux.HandleFunc("/v1/agentproxy/", AgentProxy)
 
 	mux.Handle("/", http.FileServer(http.Dir("./")))
 
