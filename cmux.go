@@ -2,11 +2,13 @@ package main
 
 import (
 	"errors"
-	dnet "github.com/dilfish/tools/net"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net"
 	"net/http"
+	"os"
+
+	dnet "github.com/dilfish/tools/net"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type MuxService struct {
@@ -32,15 +34,19 @@ func (s *MuxService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.RequestURI != "/metrics" {
 		ip := r.Header["X-Real-Ip"]
 		view := "未知"
-		if len(ip) != 0 && ip[0] != "" {
+		if len(ip) != 0 && ip[0] != "" && GlobalViewService != nil {
 			view, _ = GlobalViewService.Find(ip[0])
 		}
-		log.Println("request is:", r.Method, r.RequestURI, ip[0], view)
-		log.Println("headers are:", r.Header)
+		ipShow := ""
+		if len(ip) != 0 {
+			ipShow = ip[0]
+		}
+		log.Println("request is:", r.Method, r.RequestURI, ipShow, view)
+		log.Println("headers are:", redactHeaders(r.Header))
 	}
 	// for http3
 	if r.TLS != nil {
-		if r.TLS.ServerName != *FlagDomain {
+		if r.TLS.ServerName != Cfg.Domain {
 			log.Println("bad service name:", r.TLS.ServerName)
 			return
 		}
@@ -54,13 +60,17 @@ func (s *MuxService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set("X-HTTP3-Enable", "true")
 		w.Header().Set("X-HTTP3-Enable", "true")
 	} else {
-		if !*FlagBehindNginx {
+		if !Cfg.BehindNginx {
 			r.Header.Set("X-Real-Ip", host)
 		}
 		r.Header.Set("X-HTTP3-Enable", "false")
 		w.Header().Set("X-HTTP3-Enable", "false")
 	}
 	log.Println("request proto is:", r.Proto)
+	if needsAuth(r) && !Authorized(r) {
+		rejectUnauthorized(w, r)
+		return
+	}
 	s.Mux.ServeHTTP(w, r)
 }
 
@@ -68,13 +78,13 @@ func InitMux() (*MuxService, error) {
 	var mux MuxService
 	mux.Mux = http.ServeMux{}
 
-	if *FlagTcping {
+	if Cfg.Tcping {
 		RunTcping()
 		mux.Handle("/metrics", promhttp.Handler())
 	}
 
-	if *FlagEnableView {
-		err := InitView(*FlagV4Fn, *FlagV6Fn)
+	if Cfg.EnableView {
+		err := InitView(Cfg.V4Fn, Cfg.V6Fn)
 		if err != nil {
 			log.Println("bad view file")
 			return nil, errors.New("bad view file")
@@ -82,8 +92,8 @@ func InitMux() (*MuxService, error) {
 		mux.HandleFunc("/ip/", GlobalViewService.Handle)
 	}
 
-	if *FlagMsg {
-		MClient = NewMongoClient("mongodb://localhost:27017", "msglist", "msg")
+	if Cfg.Msg {
+		MClient = NewMongoClient(Cfg.MongoURI, Cfg.MongoDB, Cfg.MongoColl)
 		if MClient == nil {
 			return nil, errors.New("new mongo client error")
 		}
@@ -92,7 +102,7 @@ func InitMux() (*MuxService, error) {
 		mux.HandleFunc("/t/list/", MsgShow)
 	}
 
-	if *FlagTracer {
+	if Cfg.Tracer {
 		mux.HandleFunc("/tracer", HandleTracer)
 	}
 
@@ -102,8 +112,25 @@ func InitMux() (*MuxService, error) {
 	mux.HandleFunc("/api/", ApiHandler)
 	mux.HandleFunc("/upload", Uploader)
 	mux.HandleFunc("/v1/agentproxy/", AgentProxy)
+	mux.HandleFunc("/login", LoginHandler)
+	mux.HandleFunc("/logout", LogoutHandler)
+	mux.HandleFunc("/{$}", IndexHandler)
+	mux.HandleFunc("/index.html", IndexHandler)
 
-	mux.Handle("/", http.FileServer(http.Dir("./")))
+	staticDir := Cfg.StaticDir
+	if staticDir == "" {
+		staticDir = "./public"
+	}
+	st, err := os.Stat(staticDir)
+	if err != nil {
+		log.Println("static_dir error:", staticDir, err)
+		return nil, errors.New("bad static_dir")
+	}
+	if !st.IsDir() {
+		log.Println("static_dir is not a directory:", staticDir)
+		return nil, errors.New("bad static_dir")
+	}
+	mux.Handle("/", http.FileServer(http.Dir(staticDir)))
 
 	return &mux, nil
 }

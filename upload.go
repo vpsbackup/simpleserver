@@ -17,7 +17,7 @@ func Uploader(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		if IsCurl(r) {
 			upCmd := "please use command `curl -X POST -H \"Content-Type: multipart/form-data\" -F \"file=@filename.fileext\" https://"
-			upCmd = upCmd + *FlagDomain + "/upload`\n"
+			upCmd = upCmd + Cfg.Domain + "/upload`\n"
 			io.WriteString(w, upCmd)
 		} else {
 			io.WriteString(w, GetUploadPage("上传文件", "/upload"))
@@ -25,16 +25,11 @@ func Uploader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	localDir := "/root/vps/www/dl"
-	if *FlagMock {
-		localDir = "/Users/dilfish/go/src/simpleserver/dl"
-	}
-
 	if uploadService == nil {
 		uploadService = NewUploadService(
-			"https://"+*FlagDomain+"/dl/",
-			localDir,
-			"https://"+*FlagDomain+"/upload",
+			"https://"+Cfg.Domain+"/dl/",
+			Cfg.UploadDir,
+			"https://"+Cfg.Domain+"/upload",
 			MaxHTTPPayload,
 			MaxTotalFileSize,
 			NeverExpire, 5)

@@ -18,7 +18,7 @@ func RunTcping() {
 		t := NewTcpingService(addr, info.ISP, info.Region, info.Version, info.District, 60, metric)
 		go t.Start()
 	}
-	if *FlagTcping6 {
+	if Cfg.Tcping6 {
 		for addr, info := range IPMap6 {
 			if info.Region != "上海" {
 				continue

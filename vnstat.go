@@ -151,7 +151,7 @@ func PrintVnstat(v *Vnstat) PageStruct {
 		if intf.Alias != "" {
 			name = name + "(" + intf.Alias + ")"
 		}
-		ps.InfoList = append(ps.InfoList, PageInfo{Key: "box name", Value: *FlagDomain})
+		ps.InfoList = append(ps.InfoList, PageInfo{Key: "box name", Value: Cfg.Domain})
 		// ps.InfoList = append(ps.InfoList, PageInfo{Key: name + " created", Value: DateString(&intf.Created.Date)})
 		ps.InfoList = append(ps.InfoList, PageInfo{Key: name + " updated", Value: DateString(&intf.Updated.Date) + " " + TimeString(&intf.Updated.Time)})
 

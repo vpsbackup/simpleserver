@@ -48,7 +48,7 @@ func memFile(w http.ResponseWriter, r *http.Request, sizeStr string, ifSleep boo
 	}
 	if size > 0 {
 		for i := 1; i < int(size)+1; i++ {
-			str = str + string('0'+i)
+			str = str + strconv.Itoa(i%10)
 		}
 	}
 	if str != "" {

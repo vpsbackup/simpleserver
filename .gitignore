@@ -21,3 +21,6 @@
 go.work
 
 simpleserver
+
+# local runtime config (keep sample.config.json tracked)
+config.json

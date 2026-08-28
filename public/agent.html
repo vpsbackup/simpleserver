@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-bs-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>AI 助手 - 网页版聊天</title>
+<link rel="stylesheet" href="/302/bootstrap.css">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-sidebar: #0d1117;
+    --bg-input: #1f2530;
+    --bg-hover: #1c2230;
+    --bg-user: #4a5568;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --border: #30363d;
+    --accent: #4d6bfe;
+    --accent-hover: #6a85ff;
+
+    --bs-body-bg: var(--bg);
+    --bs-body-color: var(--text);
+    --bs-border-color: var(--border);
+    --bs-modal-bg: var(--bg-sidebar);
+    --bs-modal-border-color: var(--border);
+    --bs-offcanvas-bg: var(--bg-sidebar);
+    --bs-offcanvas-border-color: var(--border);
+    --bs-secondary-color: var(--text-dim);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  .app {
+    display: flex;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* ========== Sidebar (desktop static / mobile offcanvas) ========== */
+  .sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  @media (min-width: 768px) {
+    .sidebar.offcanvas {
+      position: static;
+      top: 0;
+      width: 260px;
+      height: 100vh;
+      border-right: 1px solid var(--border);
+      transform: none !important;
+      visibility: visible !important;
+      background-color: var(--bg-sidebar);
+    }
+  }
+
+  .sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .brand:hover { color: var(--text); }
+
+  .brand .logo {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #4d6bfe, #9b5cff);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .new-chat-btn {
+    margin: 16px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-input);
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background .2s;
+  }
+
+  .new-chat-btn:hover { background: var(--bg-hover); }
+
+  .history-title {
+    padding: 8px 16px 4px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px 8px;
+  }
+
+  .history::-webkit-scrollbar { width: 6px; }
+  .history::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .chat-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+    transition: background .15s;
+    margin-bottom: 2px;
+  }
+
+  .chat-item:hover { background: var(--bg-hover); }
+  .chat-item.active { background: var(--bg-hover); }
+
+  .chat-item .title {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chat-item .del {
+    opacity: 0;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+
+  .chat-item:hover .del { opacity: 1; }
+  .chat-item .del:hover { color: #ff6b6b; }
+
+  .sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .settings-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 8px;
+    transition: background .15s;
+  }
+
+  .settings-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+  .api-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f5a623;
+    flex-shrink: 0;
+  }
+  .api-status.ok { background: #3fb950; }
+  .api-status.missing { background: #f85149; }
+
+  /* ========== Topbar (mobile only) ========== */
+  .topbar {
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+    gap: 4px;
+  }
+
+  .tb-btn {
+    background: none;
+    border: none;
+    color: var(--text);
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .tb-btn:active { background: var(--bg-hover); }
+
+  .tb-title {
+    font-size: 15px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ========== Main ========== */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100%;
+  }
+
+  .chat-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 16px;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .chat-area::-webkit-scrollbar { width: 8px; }
+  .chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .messages {
+    max-width: 780px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .welcome {
+    text-align: center;
+    padding: 60px 20px 20px;
+  }
+
+  .welcome .logo-big {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 20px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, #4d6bfe, #9b5cff);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .welcome h1 { font-size: 28px; margin-bottom: 12px; }
+
+  .welcome p { color: var(--text-dim); font-size: 15px; line-height: 1.6; }
+
+  .msg { display: flex; gap: 12px; }
+
+  .msg .avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin-top: 2px;
+  }
+
+  .msg.user .avatar { background: var(--bg-user); }
+  .msg.assistant .avatar { background: linear-gradient(135deg, #4d6bfe, #9b5cff); }
+
+  .msg .content {
+    flex: 1;
+    font-size: 15px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-width: 0;
+  }
+
+  .msg.user .content {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 12px 12px 4px 12px;
+    padding: 12px 16px;
+    max-width: 85%;
+    margin-left: auto;
+    width: fit-content;
+  }
+
+  .msg.user { justify-content: flex-end; }
+  .msg.user .avatar { order: 2; margin-left: 10px; }
+  .msg.assistant .avatar { order: 0; margin-right: 10px; }
+
+  .msg.assistant .content { width: 100%; }
+
+  .reasoning {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #131a26;
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+
+  .reasoning summary {
+    cursor: pointer;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--text-dim);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+  }
+
+  .reasoning summary::-webkit-details-marker { display: none; }
+
+  .reasoning summary::before {
+    content: '▸';
+    transition: transform .15s;
+    color: var(--accent);
+  }
+
+  .reasoning[open] summary::before { transform: rotate(90deg); }
+
+  .reasoning .reasoning-body {
+    padding: 12px 14px 14px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-top: 1px solid var(--border);
+  }
+
+  .msg .content code {
+    background: var(--bg-input);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 13px;
+  }
+
+  .msg .content pre {
+    background: #161b22;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 8px 0;
+  }
+
+  .msg .content pre code {
+    background: none;
+    padding: 0;
+    font-size: 13px;
+  }
+
+  .msg .content table {
+    border-collapse: collapse;
+    margin: 8px 0;
+  }
+  .msg .content th, .msg .content td {
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+  }
+
+  .stop-btn {
+    margin-top: 12px;
+    padding: 8px 18px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--bg-input);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    transition: background .15s;
+  }
+  .stop-btn:hover { background: var(--bg-hover); }
+
+  /* ========== Input ========== */
+  .input-area {
+    padding: 16px 16px 24px;
+    max-width: 780px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .input-box {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--bg-input);
+    padding: 14px 16px;
+    transition: border-color .2s;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .input-box:focus-within { border-color: var(--accent); }
+
+  textarea {
+    width: 100%;
+    background: none;
+    border: none;
+    outline: none;
+    resize: none;
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.6;
+    font-family: inherit;
+    max-height: 200px;
+    min-height: 24px;
+  }
+
+  textarea::placeholder { color: var(--text-dim); }
+
+  .input-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .send-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .2s, opacity .2s;
+    font-size: 16px;
+  }
+
+  .send-btn:hover { background: var(--accent-hover); }
+  .send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .model-hint {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-top: 12px;
+  }
+
+  /* ========== Bootstrap overrides ========== */
+  .btn-primary {
+    --bs-btn-bg: var(--accent);
+    --bs-btn-border-color: var(--accent);
+    --bs-btn-hover-bg: var(--accent-hover);
+    --bs-btn-hover-border-color: var(--accent-hover);
+    --bs-btn-active-bg: var(--accent-hover);
+    --bs-btn-active-border-color: var(--accent-hover);
+  }
+
+  .form-control:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 .2rem rgba(77, 107, 254, .25);
+  }
+
+  .modal-content {
+    border: 1px solid var(--border);
+  }
+
+  .test-result {
+    font-size: 13px;
+    min-height: 18px;
+  }
+  .test-result.ok { color: #3fb950; }
+  .test-result.err { color: #f85149; }
+
+  .model-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .model-chip {
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+
+  .model-chip:hover { background: var(--bg-hover); }
+  .model-chip:active { background: var(--bg-hover); }
+
+  /* ========== Mobile tweaks ========== */
+  @media (max-width: 767.98px) {
+    .chat-area {
+      padding: 16px 12px;
+    }
+
+    .messages { gap: 20px; }
+
+    .input-area {
+      padding: 10px 10px calc(14px + env(safe-area-inset-bottom));
+    }
+
+    .input-box {
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+
+    .msg.user .content { max-width: 88%; }
+
+    .chat-item .del { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar: offcanvas on mobile, static column on desktop -->
+  <aside class="offcanvas offcanvas-start sidebar" id="sidebar" tabindex="-1" aria-label="对话列表">
+    <div class="sidebar-header d-flex align-items-center justify-content-between">
+      <a class="brand" href="#">
+        <span class="logo">AI</span>
+        AI 助手
+      </a>
+      <button type="button" class="btn-close d-md-none" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <button class="new-chat-btn" id="newChatBtn">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+        <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      新建对话
+    </button>
+    <div class="history-title">历史对话</div>
+    <div class="history" id="history"></div>
+    <div class="sidebar-footer">
+      <button class="settings-btn" id="openSettingsBtn">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm6-3.2a.8.8 0 0 1-.8.8h-.5a5.6 5.6 0 0 1-.3 1l.3.4a.8.8 0 1 1-1.1 1.1l-.4-.3a5.6 5.6 0 0 1-1 .3v.5a.8.8 0 1 1-1.6 0v-.5a5.6 5.6 0 0 1-1-.3l-.4.3a.8.8 0 1 1-1.1-1.1l.3-.4a5.6 5.6 0 0 1-.3-1h-.5a.8.8 0 1 1 0-1.6h.5a5.6 5.6 0 0 1 .3-1l-.3-.4A.8.8 0 1 1 6 2.3l.4.3a5.6 5.6 0 0 1 1-.3v-.5a.8.8 0 1 1 1.6 0v.5a5.6 5.6 0 0 1 1 .3l.4-.3a.8.8 0 1 1 1.1 1.1l-.3.4a5.6 5.6 0 0 1 .3 1h.5a.8.8 0 0 1 .8.8Z" fill="currentColor"/>
+        </svg>
+        设置
+      </button>
+      <span class="api-status" id="apiStatus" title="未配置 API"></span>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar d-flex d-md-none align-items-center px-2 py-2">
+      <button type="button" class="tb-btn" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-label="菜单">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+          <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="tb-title flex-grow-1 ms-2">AI 助手</span>
+      <button type="button" class="tb-btn" id="newChatBtnMob" aria-label="新建对话">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+          <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button type="button" class="tb-btn" id="openSettingsBtnMob" aria-label="设置">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+          <path d="M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm6-3.2a.8.8 0 0 1-.8.8h-.5a5.6 5.6 0 0 1-.3 1l.3.4a.8.8 0 1 1-1.1 1.1l-.4-.3a5.6 5.6 0 0 1-1 .3v.5a.8.8 0 1 1-1.6 0v-.5a5.6 5.6 0 0 1-1-.3l-.4.3a.8.8 0 1 1-1.1-1.1l.3-.4a5.6 5.6 0 0 1-.3-1h-.5a.8.8 0 1 1 0-1.6h.5a5.6 5.6 0 0 1 .3-1l-.3-.4A.8.8 0 1 1 6 2.3l.4.3a5.6 5.6 0 0 1 1-.3v-.5a.8.8 0 1 1 1.6 0v.5a5.6 5.6 0 0 1 1 .3l.4-.3a.8.8 0 1 1 1.1 1.1l-.3.4a5.6 5.6 0 0 1 .3 1h.5a.8.8 0 0 1 .8.8Z" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+    <div class="chat-area" id="chatArea">
+      <div class="messages" id="messages"></div>
+    </div>
+    <div class="input-area">
+      <div class="input-box">
+        <textarea id="input" rows="1" placeholder="给 AI 助手发送消息…" disabled></textarea>
+        <div class="input-footer">
+          <button class="send-btn" id="sendBtn" disabled>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2 2l12 6-12 6 3-6-3-6Z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="model-hint" id="modelHint">请在设置中配置 API 密钥以开始对话</div>
+    </div>
+  </main>
+</div>
+
+<!-- Settings Modal (Bootstrap) -->
+<div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">接口设置</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="apiKey" class="form-label">API 密钥</label>
+          <input type="password" class="form-control" id="apiKey" placeholder="sk-..." autocomplete="off">
+          <div class="form-text">密钥仅保存在浏览器本地 (localStorage)，不会上传到任何服务器。</div>
+        </div>
+        <div class="mb-3">
+          <label for="apiBase" class="form-label">API 地址</label>
+          <input type="text" class="form-control" id="apiBase" placeholder="https://cn3.heilovehei.com">
+          <div class="form-text">OpenAI 兼容接口地址，默认 https://cn3.heilovehei.com</div>
+        </div>
+        <div class="mb-3">
+          <label for="proxy" class="form-label">服务端代理路径（可选，解决跨域）</label>
+          <input type="text" class="form-control" id="proxy" placeholder="/v1/agentproxy">
+          <div class="form-text">与后端 Go handler 配合使用，默认 /v1/agentproxy；留空则直接请求 API</div>
+        </div>
+        <div class="mb-3">
+          <label for="model" class="form-label">模型</label>
+          <div class="d-flex gap-2">
+            <input type="text" class="form-control" id="model" placeholder="grok-4.5">
+            <button type="button" class="btn btn-outline-secondary text-nowrap" id="listModelsBtn">获取模型列表</button>
+          </div>
+          <div class="form-text">默认 grok-4.5，也可点击右侧按钮从接口拉取可用模型</div>
+          <div class="model-list" id="modelList"></div>
+        </div>
+        <div class="mb-3">
+          <label for="systemPrompt" class="form-label">系统提示词（可选）</label>
+          <input type="text" class="form-control" id="systemPrompt" placeholder="你是一个乐于助人的智能助手">
+        </div>
+        <div class="test-result" id="testResult"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="testBtn">测试连接</button>
+        <button type="button" class="btn btn-outline-secondary" id="closeSettingsBtn">取消</button>
+        <button type="button" class="btn btn-primary" id="saveSettingsBtn">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/302/bootstrap.js"></script>
+<script>
+(function () {
+  const STORAGE_KEY = 'deepseek_web_settings';
+  const HISTORY_KEY = 'deepseek_web_history';
+
+  let settings = {
+    apiKey: '',
+    apiBase: 'https://cn3.heilovehei.com',
+    proxy: '/v1/agentproxy',
+    model: 'grok-4.5',
+    systemPrompt: ''
+  };
+
+  // conversations: [{ id, title, messages: [{role, content, reasoning}] }]
+  let conversations = [];
+  let currentId = null;
+  let abortController = null;
+  let streaming = false;
+
+  const $ = (id) => document.getElementById(id);
+
+  const $messages = $('messages');
+  const $chatArea = $('chatArea');
+  const $input = $('input');
+  const $sendBtn = $('sendBtn');
+  const $history = $('history');
+  const $modelHint = $('modelHint');
+  const $apiStatus = $('apiStatus');
+
+  /* ---------- persistence ---------- */
+  function loadState() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      settings = { ...settings, ...s };
+    } catch (e) {}
+    try {
+      conversations = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    } catch (e) { conversations = []; }
+  }
+
+  function saveSettings() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  }
+
+  function saveHistory() {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(conversations));
+  }
+
+  /* ---------- helpers ---------- */
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function escapeHtml(text) {
+    const escTxt = esc(text);
+    // inline code
+    let html = escTxt.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // code blocks
+    html = html.replace(/```([\s\S]*?)```/g, function (m, code) {
+      return '<pre><code>' + code + '</code></pre>';
+    });
+    return html;
+  }
+
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function updateApiStatus() {
+    if (!settings.apiKey) {
+      $apiStatus.className = 'api-status missing';
+      $apiStatus.title = '未配置 API 密钥';
+    } else {
+      $apiStatus.className = 'api-status ok';
+      $apiStatus.title = 'API 已配置 · ' + settings.model;
+    }
+  }
+
+  function updateInputState() {
+    const hasKey = !!settings.apiKey;
+    $input.disabled = !hasKey || streaming;
+    $sendBtn.disabled = !hasKey || streaming;
+    if (!hasKey) {
+      $modelHint.textContent = '请在设置中配置 API 密钥以开始对话';
+    } else if (streaming) {
+      $modelHint.textContent = settings.model + ' 正在回复…';
+    } else {
+      $modelHint.textContent = settings.model + ' · ' + (settings.proxy || settings.apiBase);
+    }
+  }
+
+  function getCurrent() {
+    return conversations.find((c) => c.id === currentId) || null;
+  }
+
+  /* ---------- rendering ---------- */
+  function renderHistory() {
+    $history.innerHTML = '';
+    if (conversations.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'chat-item';
+      empty.style.cursor = 'default';
+      empty.style.color = 'var(--text-dim)';
+      empty.textContent = '暂无历史对话';
+      $history.appendChild(empty);
+      return;
+    }
+    conversations.forEach((c) => {
+      const item = document.createElement('div');
+      item.className = 'chat-item' + (c.id === currentId ? ' active' : '');
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = c.title;
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '×';
+      del.title = '删除对话';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteConversation(c.id);
+      });
+      item.appendChild(title);
+      item.appendChild(del);
+      item.addEventListener('click', () => selectConversation(c.id));
+      $history.appendChild(item);
+    });
+  }
+
+  function renderMessages() {
+    const conv = getCurrent();
+    $messages.innerHTML = '';
+    if (!conv || conv.messages.length === 0) {
+      $messages.appendChild(welcomeNode());
+      return;
+    }
+    conv.messages.forEach((m) => {
+      $messages.appendChild(messageNode(m.role, m.content, m.reasoning));
+    });
+    scrollToBottom();
+  }
+
+  function welcomeNode() {
+    const div = document.createElement('div');
+    div.className = 'welcome';
+    div.innerHTML =
+      '<div class="logo-big">AI</div>' +
+      '<h1>你好，我是 AI 助手</h1>' +
+      '<p>我可以帮你处理和学习文本，阅读链接及上传的文件，还可以联网搜索。<br>' +
+      '请先在「设置」中配置 API 密钥，然后开始对话吧。</p>';
+    return div;
+  }
+
+  function messageNode(role, content, reasoning) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = role === 'user' ? '我' : 'D';
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'content';
+    if (role === 'assistant' && reasoning) {
+      const details = document.createElement('details');
+      details.className = 'reasoning';
+      details.open = true;
+      const summary = document.createElement('summary');
+      summary.textContent = '思考过程';
+      const body = document.createElement('div');
+      body.className = 'reasoning-body';
+      body.textContent = reasoning;
+      details.appendChild(summary);
+      details.appendChild(body);
+      contentDiv.appendChild(details);
+    }
+    const text = document.createElement('div');
+    text.className = 'msg-text';
+    text.innerHTML = escapeHtml(content) || '…';
+    contentDiv.appendChild(text);
+    div.appendChild(avatar);
+    div.appendChild(contentDiv);
+    return div;
+  }
+
+  function scrollToBottom() {
+    requestAnimationFrame(() => {
+      $chatArea.scrollTop = $chatArea.scrollHeight;
+    });
+  }
+
+  /* ---------- mobile helpers ---------- */
+  function isMobile() {
+    return window.matchMedia('(max-width: 767.98px)').matches;
+  }
+
+  function closeMobileSidebar() {
+    if (!isMobile()) return;
+    const sidebar = $('sidebar');
+    if (window.bootstrap && sidebar.classList.contains('show')) {
+      window.bootstrap.Offcanvas.getOrCreateInstance(sidebar).hide();
+    }
+  }
+
+  /* ---------- conversation management ---------- */
+  function selectConversation(id) {
+    if (streaming) stopStream();
+    currentId = id;
+    renderHistory();
+    renderMessages();
+    closeMobileSidebar();
+  }
+
+  function deleteConversation(id) {
+    conversations = conversations.filter((c) => c.id !== id);
+    if (currentId === id) {
+      currentId = conversations.length ? conversations[conversations.length - 1].id : null;
+    }
+    saveHistory();
+    renderHistory();
+    renderMessages();
+  }
+
+  function newConversation() {
+    if (streaming) stopStream();
+    currentId = uid();
+    conversations.push({ id: currentId, title: '新对话', messages: [] });
+    saveHistory();
+    renderHistory();
+    renderMessages();
+    closeMobileSidebar();
+    focusInput();
+  }
+
+  function ensureConversation() {
+    if (!currentId || !getCurrent()) {
+      currentId = uid();
+      conversations.push({ id: currentId, title: '新对话', messages: [] });
+    }
+    return getCurrent();
+  }
+
+  function focusInput() {
+    if (!settings.apiKey) return;
+    $input.disabled = false;
+    $input.focus();
+  }
+
+  function apiUrl(path) {
+    const proxy = (settings.proxy || '').trim();
+    if (proxy) {
+      return proxy.replace(/\/+$/, '') + path;
+    }
+    return settings.apiBase.replace(/\/+$/, '') + path;
+  }
+
+  function apiHeaders() {
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + settings.apiKey
+    };
+    if (settings.proxy && settings.proxy.trim()) {
+      headers['x-upstream-base'] = settings.apiBase.replace(/\/+$/, '');
+    }
+    return headers;
+  }
+
+  /* ---------- send ---------- */
+  async function send() {
+    if (streaming || !settings.apiKey) return;
+    const text = $input.value.trim();
+    if (!text) return;
+
+    const conv = ensureConversation();
+    if (conv.messages.length === 0) {
+      conv.title = text.slice(0, 20) + (text.length > 20 ? '…' : '');
+    }
+    conv.messages.push({ role: 'user', content: text });
+    conv.messages.push({ role: 'assistant', content: '', reasoning: '' });
+    saveHistory();
+
+    $input.value = '';
+    $input.style.height = 'auto';
+    renderHistory();
+    renderMessages();
+
+    await streamReply(conv);
+  }
+
+  async function streamReply(conv) {
+    const assistantMsg = conv.messages[conv.messages.length - 1];
+
+    // update message node to streaming view
+    const nodes = $messages.querySelectorAll('.msg.assistant');
+    const targetNode = nodes[nodes.length - 1];
+    const contentDiv = targetNode.querySelector('.content');
+    const textDiv = targetNode.querySelector('.msg-text');
+    textDiv.innerHTML = '<span style="color:var(--text-dim)">正在思考…</span>';
+
+    let reasoningDiv = null;
+    let reasoningBody = null;
+
+    streaming = true;
+    updateInputState();
+
+    // show stop button
+    const stopBtn = document.createElement('button');
+    stopBtn.className = 'stop-btn';
+    stopBtn.textContent = '停止生成';
+    stopBtn.addEventListener('click', () => abortController && abortController.abort());
+    targetNode.appendChild(stopBtn);
+    scrollToBottom();
+
+    const messages = [];
+    if (settings.systemPrompt.trim()) {
+      messages.push({ role: 'system', content: settings.systemPrompt.trim() });
+    }
+    conv.messages.filter((m) => m !== assistantMsg || m.content).forEach((m) => {
+      if (m.content) messages.push({ role: m.role, content: m.content });
+    });
+
+    abortController = new AbortController();
+
+    const url = apiUrl('/chat/completions');
+    const headers = apiHeaders();
+
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          model: settings.model,
+          messages: messages,
+          stream: true
+        }),
+        signal: abortController.signal
+      });
+
+      if (!resp.ok) {
+        if (resp.status === 401) {
+          throw new Error('未登录站点：请先打开首页 / 登录后再聊');
+        }
+        let detail = '';
+        try {
+          const err = await resp.json();
+          detail = err.error && err.error.message ? err.error.message : JSON.stringify(err);
+        } catch (e) { detail = resp.statusText; }
+        throw new Error('HTTP ' + resp.status + ': ' + detail);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      textDiv.innerHTML = '';
+      textDiv.textContent = '';
+      textDiv.removeAttribute('innerHTML');
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const json = JSON.parse(data);
+            const delta = json.choices && json.choices[0] && json.choices[0].delta;
+            if (!delta) continue;
+
+            if (delta.reasoning_content) {
+              if (!reasoningDiv) {
+                reasoningDiv = document.createElement('details');
+                reasoningDiv.className = 'reasoning';
+                reasoningDiv.open = true;
+                const summary = document.createElement('summary');
+                summary.textContent = '思考过程';
+                reasoningBody = document.createElement('div');
+                reasoningBody.className = 'reasoning-body';
+                reasoningDiv.appendChild(summary);
+                reasoningBody.textContent = '';
+                reasoningDiv.appendChild(reasoningBody);
+                contentDiv.insertBefore(reasoningDiv, textDiv);
+              }
+              assistantMsg.reasoning = (assistantMsg.reasoning || '') + delta.reasoning_content;
+              reasoningBody.textContent = assistantMsg.reasoning;
+              scrollToBottom();
+            }
+
+            if (delta.content) {
+              if (textDiv.innerHTML.includes('正在思考')) {
+                textDiv.innerHTML = '';
+                textDiv.textContent = '';
+              }
+              assistantMsg.content += delta.content;
+              textDiv.textContent = assistantMsg.content;
+              scrollToBottom();
+            }
+          } catch (e) { /* ignore partial lines */ }
+        }
+      }
+
+      stopBtn.remove();
+      if (!assistantMsg.content) {
+        textDiv.innerHTML = '<span style="color:var(--text-dim)">（无回复）</span>';
+      }
+    } catch (err) {
+      stopBtn.remove();
+      if (err.name === 'AbortError') {
+        if (assistantMsg.content) {
+          textDiv.textContent = assistantMsg.content;
+        } else {
+          textDiv.innerHTML = '<span style="color:var(--text-dim)">（已停止）</span>';
+        }
+      } else {
+        textDiv.textContent = '';
+        textDiv.innerHTML = '<span style="color:#f85149">请求失败：' + esc(err.message) + '</span>';
+      }
+    } finally {
+      streaming = false;
+      abortController = null;
+      saveHistory();
+      renderHistory();
+      updateInputState();
+      if (!settings.apiKey) {
+        $modelHint.textContent = '请在设置中配置 API 密钥以开始对话';
+      }
+      $input.disabled = false;
+      if (settings.apiKey) $input.focus();
+    }
+  }
+
+  function stopStream() {
+    if (abortController) abortController.abort();
+  }
+
+  /* ---------- settings modal ---------- */
+  function openSettings() {
+    $('apiKey').value = settings.apiKey;
+    $('apiBase').value = settings.apiBase;
+    $('proxy').value = settings.proxy;
+    $('model').value = settings.model;
+    $('systemPrompt').value = settings.systemPrompt;
+    $('testResult').textContent = '';
+    $('testResult').className = 'test-result';
+    $('modelList').innerHTML = '';
+    if (window.bootstrap) {
+      window.bootstrap.Modal.getOrCreateInstance($('settingsModal')).show();
+    } else {
+      $('settingsModal').classList.add('show');
+    }
+  }
+
+  function closeSettings() {
+    if (window.bootstrap) {
+      window.bootstrap.Modal.getOrCreateInstance($('settingsModal')).hide();
+    } else {
+      $('settingsModal').classList.remove('show');
+    }
+  }
+
+  async function testConnection() {
+    const key = $('apiKey').value.trim();
+    const apiBase = ($('apiBase').value.trim() || 'https://cn3.heilovehei.com').replace(/\/+$/, '');
+    const proxy = $('proxy').value.trim();
+    const model = $('model').value.trim() || 'grok-4.5';
+    const result = $('testResult');
+    result.textContent = '测试中…';
+    result.className = 'test-result';
+    try {
+      const base = (proxy || apiBase).replace(/\/+$/, '');
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + key
+      };
+      if (proxy) headers['x-upstream-base'] = apiBase;
+      const resp = await fetch(base + '/chat/completions', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 8,
+          stream: false
+        })
+      });
+      if (!resp.ok) {
+        if (resp.status === 401) {
+          throw new Error('未登录站点：请先打开首页 / 登录');
+        }
+        let detail = resp.statusText;
+        try {
+          const err = await resp.json();
+          detail = err.error && err.error.message ? err.error.message : detail;
+        } catch (e) {}
+        throw new Error('HTTP ' + resp.status + ': ' + detail);
+      }
+      const data = await resp.json();
+      const reply = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+      result.textContent = '连接成功 ✓' + (reply ? ' 回复：' + reply.slice(0, 30) : '');
+      result.className = 'test-result ok';
+    } catch (err) {
+      result.textContent = '连接失败：' + err.message;
+      result.className = 'test-result err';
+    }
+  }
+
+  async function listModels() {
+    const key = $('apiKey').value.trim();
+    const apiBase = ($('apiBase').value.trim() || 'https://cn3.heilovehei.com').replace(/\/+$/, '');
+    const proxy = $('proxy').value.trim();
+    const list = $('modelList');
+    const btn = $('listModelsBtn');
+    if (!key) {
+      list.innerHTML = '<span class="text-danger">请先填写 API 密钥</span>';
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '加载中…';
+    list.innerHTML = '<span class="text-secondary">加载中…</span>';
+    try {
+      const base = (proxy || apiBase).replace(/\/+$/, '');
+      const headers = { 'Authorization': 'Bearer ' + key };
+      if (proxy) headers['x-upstream-base'] = apiBase;
+
+      let resp = await fetch(base + '/models', { headers });
+      if (!resp.ok) resp = await fetch(base + '/v1/models', { headers });
+      if (!resp.ok) {
+        if (resp.status === 401) {
+          throw new Error('未登录站点：请先打开首页 / 登录');
+        }
+        let detail = resp.statusText;
+        try {
+          const err = await resp.json();
+          detail = err.error && err.error.message ? err.error.message : detail;
+        } catch (e) {}
+        throw new Error('HTTP ' + resp.status + ': ' + detail);
+      }
+      const data = await resp.json();
+      const models = (data.data || []).map((m) => m.id).filter(Boolean);
+      if (models.length === 0) {
+        list.innerHTML = '<span class="text-secondary">接口未返回模型数据</span>';
+        return;
+      }
+      list.innerHTML = '';
+      models.forEach((id) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'model-chip';
+        chip.textContent = id;
+        chip.title = '选择 ' + id;
+        chip.addEventListener('click', () => {
+          $('model').value = id;
+        });
+        list.appendChild(chip);
+      });
+    } catch (err) {
+      list.innerHTML = '<span class="text-danger">获取失败：' + esc(err.message) + '</span>';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '获取模型列表';
+    }
+  }
+
+  function saveSettingsFromModal() {
+    settings.apiKey = $('apiKey').value.trim();
+    settings.apiBase = ($('apiBase').value.trim() || 'https://cn3.heilovehei.com').replace(/\/+$/, '');
+    settings.proxy = $('proxy').value.trim();
+    settings.model = $('model').value.trim() || 'grok-4.5';
+    settings.systemPrompt = $('systemPrompt').value.trim();
+    saveSettings();
+    closeSettings();
+    updateApiStatus();
+    updateInputState();
+    focusInput();
+  }
+
+  /* ---------- events ---------- */
+  $('newChatBtn').addEventListener('click', newConversation);
+  $('newChatBtnMob').addEventListener('click', newConversation);
+  $('openSettingsBtn').addEventListener('click', openSettings);
+  $('openSettingsBtnMob').addEventListener('click', openSettings);
+  $('closeSettingsBtn').addEventListener('click', closeSettings);
+  $('saveSettingsBtn').addEventListener('click', saveSettingsFromModal);
+  $('testBtn').addEventListener('click', testConnection);
+  $('listModelsBtn').addEventListener('click', listModels);
+
+  $sendBtn.addEventListener('click', send);
+
+  $input.addEventListener('input', () => {
+    $input.style.height = 'auto';
+    $input.style.height = Math.min($input.scrollHeight, 200) + 'px';
+  });
+
+  $input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  });
+
+  /* ---------- init ---------- */
+  loadState();
+  updateApiStatus();
+  updateInputState();
+
+  if (conversations.length === 0) {
+    currentId = uid();
+    conversations.push({ id: currentId, title: '新对话', messages: [] });
+    saveHistory();
+  } else {
+    currentId = conversations[conversations.length - 1].id;
+  }
+  renderHistory();
+  renderMessages();
+  focusInput();
+})();
+</script>
+</body>
+</html>

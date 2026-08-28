@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -8,9 +9,17 @@ import (
 	"strings"
 )
 
+var (
+	errUpstreamMissing   = errors.New("missing x-upstream-base header")
+	errUpstreamInvalid   = errors.New("invalid x-upstream-base")
+	errUpstreamNotHTTPS  = errors.New("upstream must use https")
+	errUpstreamNotAllow  = errors.New("upstream host not allowed")
+)
+
 // AgentProxy 转发 OpenAI 兼容接口的请求，解决浏览器跨域问题。
 // 前端通过 POST /v1/agentproxy/chat/completions 发起请求，
 // 并在 header 中携带 x-upstream-base 指定真实 API 地址。
+// 上游 Host 必须命中 -auh 白名单，且仅允许 https。
 func AgentProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		setCORS(w)
@@ -24,12 +33,20 @@ func AgentProxy(w http.ResponseWriter, r *http.Request) {
 
 	upstream := strings.TrimSpace(r.Header.Get("x-upstream-base"))
 	if upstream == "" {
-		http.Error(w, "missing x-upstream-base header", http.StatusBadRequest)
+		http.Error(w, errUpstreamMissing.Error(), http.StatusBadRequest)
 		return
 	}
 	u, err := url.Parse(upstream)
 	if err != nil || u.Host == "" {
-		http.Error(w, "invalid x-upstream-base", http.StatusBadRequest)
+		http.Error(w, errUpstreamInvalid.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := allowedAgentUpstream(u); err != nil {
+		status := http.StatusForbidden
+		if errors.Is(err, errUpstreamNotHTTPS) || errors.Is(err, errUpstreamInvalid) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 
@@ -57,6 +74,41 @@ func AgentProxy(w http.ResponseWriter, r *http.Request) {
 
 	setCORS(w)
 	proxy.ServeHTTP(w, r)
+}
+
+func hostAllowed(host string) bool {
+	host = strings.ToLower(host)
+	if host == "" || len(AgentUpstreamHosts) == 0 {
+		return false
+	}
+	if _, ok := AgentUpstreamHosts[host]; ok {
+		return true
+	}
+	// 后缀匹配：白名单 heilovehei.com 可放行 cn3.heilovehei.com
+	// 要求前导 '.'，避免 evilheilovehei.com 误放行
+	for allowed := range AgentUpstreamHosts {
+		if allowed != "" && strings.HasSuffix(host, "."+allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func allowedAgentUpstream(u *url.URL) error {
+	if u == nil || u.Host == "" {
+		return errUpstreamInvalid
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return errUpstreamNotHTTPS
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return errUpstreamInvalid
+	}
+	if !hostAllowed(host) {
+		return errUpstreamNotAllow
+	}
+	return nil
 }
 
 func setCORS(w http.ResponseWriter) {

@@ -70,7 +70,7 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	if u.Curr+header.Size > u.MaxSize {
 		log.Println("too many write", "curr", u.Curr, "size", header.Size, "max size", u.MaxSize)
-		msg := fmt.Sprintf("curr: %u, max: %u", u.Curr, u.MaxSize)
+		msg := fmt.Sprintf("curr: %d, max: %d", u.Curr, u.MaxSize)
 		io.WriteString(w, "Too many write: "+msg)
 		return
 	}
@@ -175,7 +175,7 @@ func GetUploadPage(title, path string) string {
     <main role="main" class="container">
         <div class="jumbotron">
             <h1>累积上传最多1G，单次最大10M</h1>
-            <h1>curl -X POST -H "Content-Type: multipart/form-data" -F "file=@filename.fileext" https://` + *FlagDomain + `/upload</h1>
+            <h1>curl -X POST -H "Content-Type: multipart/form-data" -F "file=@filename.fileext" https://` + Cfg.Domain + `/upload</h1>
         </div>
     </main>
 
