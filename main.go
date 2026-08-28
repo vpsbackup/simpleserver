@@ -10,6 +10,11 @@ import (
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 
+	if len(os.Args) >= 2 && os.Args[1] == "version" {
+		PrintVersionJSON()
+		return
+	}
+
 	configPath := ParseArgs()
 	if err := LoadConfig(configPath); err != nil {
 		log.Println("load config error:", err)

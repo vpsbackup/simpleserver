@@ -203,12 +203,15 @@ func printUsage() {
 	fmt.Fprintf(flag.CommandLine.Output(), `
 Usage:
   simpleserver [-c config.json]
+  simpleserver version
 
 Options:
   -c string
         path to JSON config file (default "config.json")
   -h, -help
         show this help and exit
+  version
+        print full Go build/debug info as JSON and exit
 
 Config file (JSON, snake_case). Omitted keys use defaults.
 See sample.config.json for a full example with fake data.
