@@ -174,8 +174,84 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
     <meta name="theme-color" content="#DC3545"/>
     <title>About this site & me</title>
     <link href="/302/bootstrap.css" rel="stylesheet">
+    <style>
+      .auth-corner {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 1030;
+        width: min(280px, calc(100vw - 32px));
+        background: #fff;
+        border: 1px solid rgba(0,0,0,.08);
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,.08);
+        padding: 12px;
+      }
+      .auth-corner .auth-title {
+        font-size: 12px;
+        color: #6c757d;
+        margin-bottom: 8px;
+      }
+      .auth-corner .auth-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .auth-corner .form-control {
+        min-width: 0;
+      }
+      .auth-corner .auth-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+        font-size: 13px;
+      }
+      .auth-corner .auth-error {
+        color: #dc3545;
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      .auth-corner .auth-ok {
+        color: #198754;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      body { padding-top: 12px; }
+      @media (max-width: 576px) {
+        main.container { padding-top: 88px; }
+      }
+    </style>
   </head>
   <body>
+`)
+	b.WriteString(`    <div class="auth-corner">`)
+	if !authEnabled() {
+		b.WriteString(`<div class="auth-title">Auth</div><div class="text-muted" style="font-size:13px">disabled</div>`)
+	} else if Authorized(r) {
+		b.WriteString(`<div class="auth-row" style="justify-content:space-between">
+  <div class="auth-ok">已登录</div>
+  <form action="/logout" method="post" style="margin:0">
+    <button class="btn btn-sm btn-outline-danger" type="submit">登出</button>
+  </form>
+</div>
+<div class="auth-links">
+  <a href="/agent.html">AI 助手</a>
+  <a href="/upload">上传</a>
+  <a href="/t">留言</a>
+</div>`)
+	} else {
+		msg := r.URL.Query().Get("err")
+		if msg != "" {
+			b.WriteString(`<div class="auth-error">` + html.EscapeString(msg) + `</div>`)
+		}
+		b.WriteString(`<div class="auth-title">登录</div>
+<form action="/login" method="post" class="auth-row">
+  <input class="form-control form-control-sm" type="password" id="password" name="password" placeholder="密码" required autofocus>
+  <button class="btn btn-sm btn-danger" type="submit">登录</button>
+</form>`)
+	}
+	b.WriteString(`</div>
     <main role="main" class="container">
       <h1 class="mt-5">🪛 About this site</h1>
       <p class="lead">
@@ -185,32 +261,6 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
       <p class="lead">
 veteran programmer, grshccji atsign duck.com
 </p>
-`)
-	if !authEnabled() {
-		b.WriteString(`<div class="alert alert-secondary mt-4">Auth is disabled (auth_password is empty).</div>`)
-	} else if Authorized(r) {
-		b.WriteString(`<div class="alert alert-success mt-4">已登录</div>
-<form action="/logout" method="post" class="mt-3">
-  <button class="btn btn-outline-danger" type="submit">登出</button>
-</form>
-<p class="mt-4"><a href="/agent.html">打开 AI 助手</a> · <a href="/upload">上传</a> · <a href="/t">留言</a></p>
-`)
-	} else {
-		msg := r.URL.Query().Get("err")
-		if msg != "" {
-			b.WriteString(`<div class="alert alert-danger mt-4">` + html.EscapeString(msg) + `</div>`)
-		}
-		b.WriteString(`<h1 class="mt-5">Login</h1>
-<form action="/login" method="post" class="mt-3" style="max-width:420px">
-  <div class="mb-3">
-    <label class="form-label" for="password">Password</label>
-    <input class="form-control" type="password" id="password" name="password" required autofocus>
-  </div>
-  <button class="btn btn-danger" type="submit">登录</button>
-</form>
-`)
-	}
-	b.WriteString(`
 </main>
     <footer class="footer">
       <div class="container">
