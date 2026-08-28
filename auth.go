@@ -151,13 +151,14 @@ func rejectUnauthorized(w http.ResponseWriter, r *http.Request) {
 	accept := r.Header.Get("Accept")
 	secFetch := r.Header.Get("Sec-Fetch-Mode")
 	if r.Method == http.MethodGet || strings.Contains(accept, "text/html") || secFetch == "navigate" {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/dilfish.html", http.StatusFound)
 		return
 	}
-	http.Error(w, "unauthorized: login at / first", http.StatusUnauthorized)
+	http.Error(w, "unauthorized: login at /dilfish.html first", http.StatusUnauthorized)
 }
 
-func IndexHandler(w http.ResponseWriter, r *http.Request) {
+// DilfishHandler is the obscure login page at /dilfish.html.
+func DilfishHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -169,10 +170,8 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="about">
-    <meta name="author" content="sean">
-    <meta name="theme-color" content="#DC3545"/>
-    <title>About this site & me</title>
+    <meta name="robots" content="noindex,nofollow">
+    <title>dilfish</title>
     <link href="/302/bootstrap.css" rel="stylesheet">
     <style>
       .auth-corner {
@@ -197,9 +196,7 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
         gap: 8px;
         align-items: center;
       }
-      .auth-corner .form-control {
-        min-width: 0;
-      }
+      .auth-corner .form-control { min-width: 0; }
       .auth-corner .auth-links {
         display: flex;
         flex-wrap: wrap;
@@ -218,14 +215,11 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
         font-weight: 600;
       }
       body { padding-top: 12px; }
-      @media (max-width: 576px) {
-        main.container { padding-top: 88px; }
-      }
     </style>
   </head>
   <body>
+    <div class="auth-corner">
 `)
-	b.WriteString(`    <div class="auth-corner">`)
 	if !authEnabled() {
 		b.WriteString(`<div class="auth-title">Auth</div><div class="text-muted" style="font-size:13px">disabled</div>`)
 	} else if Authorized(r) {
@@ -239,6 +233,7 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
   <a href="/agent.html">AI 助手</a>
   <a href="/upload">上传</a>
   <a href="/t">留言</a>
+  <a href="/">首页</a>
 </div>`)
 	} else {
 		msg := r.URL.Query().Get("err")
@@ -251,34 +246,8 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
   <button class="btn btn-sm btn-danger" type="submit">登录</button>
 </form>`)
 	}
-	b.WriteString(`</div>
-    <main role="main" class="container">
-      <h1 class="mt-5">🪛 About this site</h1>
-      <p class="lead">
-     This is a personal website, you need authorative information to visit it.
-</p>
-      <h1 class="mt-5">About me</h1>
-      <p class="lead">
-veteran programmer, grshccji atsign duck.com
-</p>
-</main>
-    <footer class="footer">
-      <div class="container">
-  <span class="text-muted">
-        ARM.871116.XYZ &copy;
-        All rights reserved，
-        2020-2026
-  </span>
-  </div>
-</footer>
-<footer class="footer">
-<div class="container">
-  <span class="text-muted">
- This website is powered by honourable IPv6,
- and obsoleting the despicable IPv4.
-  </span>
-</div>
-</footer>
+	b.WriteString(`
+    </div>
   </body>
 </html>
 `)
@@ -287,26 +256,26 @@ veteran programmer, grshccji atsign duck.com
 
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/dilfish.html", http.StatusFound)
 		return
 	}
 	if !authEnabled() {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/dilfish.html", http.StatusFound)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Redirect(w, r, "/?err="+htmlQuery("bad form"), http.StatusFound)
+		http.Redirect(w, r, "/dilfish.html?err="+htmlQuery("bad form"), http.StatusFound)
 		return
 	}
 	if !passwordMatch(r.FormValue("password")) {
 		log.Println("login failed from", r.RemoteAddr)
-		http.Redirect(w, r, "/?err="+htmlQuery("password incorrect"), http.StatusFound)
+		http.Redirect(w, r, "/dilfish.html?err="+htmlQuery("password incorrect"), http.StatusFound)
 		return
 	}
 	setAuthCookie(w, r)
 	next := r.FormValue("next")
 	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
-		next = "/"
+		next = "/dilfish.html"
 	}
 	http.Redirect(w, r, next, http.StatusFound)
 }
@@ -317,7 +286,7 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clearAuthCookie(w, r)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, "/dilfish.html", http.StatusFound)
 }
 
 func htmlQuery(s string) string {

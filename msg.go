@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html"
 	"log"
 	"net/http"
 	"time"
@@ -39,9 +40,10 @@ func MsgList(w http.ResponseWriter, r *http.Request) {
 	}
 	beijingLocation := time.FixedZone("CST", 8*60*60)
 	for _, l := range list {
-		ht = ht + "<a href=\"/t/list/" + l.Id + "\"> Info </a>, " + l.CreateAt.In(beijingLocation).String() + "<br>"
+		ht = ht + "<a href=\"/t/list/" + html.EscapeString(l.Id) + "\"> Info </a>, " + html.EscapeString(l.CreateAt.In(beijingLocation).String()) + "<br>"
 	}
 	ht = ht + "</div></h1></body></html>"
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(ht))
 }
 
@@ -67,9 +69,13 @@ func MsgShow(w http.ResponseWriter, r *http.Request) {
 	err := MClient.Find(cond, &msg)
 	if err != nil || len(msg) <= 0 {
 		log.Println("msg id:", msgId, err)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte("no such msg id:" + msgId))
 		return
 	}
+	// Serve as plain text to avoid stored XSS when message contains HTML/JS.
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Write([]byte(msg[0].Msg))
 }
 

@@ -114,8 +114,7 @@ func InitMux() (*MuxService, error) {
 	mux.HandleFunc("/v1/agentproxy/", AgentProxy)
 	mux.HandleFunc("/login", LoginHandler)
 	mux.HandleFunc("/logout", LogoutHandler)
-	mux.HandleFunc("/{$}", IndexHandler)
-	mux.HandleFunc("/index.html", IndexHandler)
+	mux.HandleFunc("/dilfish.html", DilfishHandler)
 
 	staticDir := Cfg.StaticDir
 	if staticDir == "" {

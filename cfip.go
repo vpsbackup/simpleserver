@@ -41,7 +41,10 @@ func CFIPHandler(w http.ResponseWriter, r *http.Request) {
 	ii.Value = ipStr
 	kvList = append([]IPInfo{ii}, kvList...)
 
-	view, _ := GlobalViewService.Find(ipStr)
+	view := "未知"
+	if GlobalViewService != nil {
+		view, _ = GlobalViewService.Find(ipStr)
+	}
 	ii.Key = "X-IP-View"
 	ii.Value = view
 	kvList = append([]IPInfo{ii}, kvList...)

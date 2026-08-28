@@ -1008,7 +1008,7 @@
 
       if (!resp.ok) {
         if (resp.status === 401) {
-          throw new Error('未登录站点：请先打开首页 / 登录后再聊');
+          throw new Error('未登录站点：请先打开 /dilfish.html 登录后再聊');
         }
         let detail = '';
         try {
@@ -1162,7 +1162,7 @@
       });
       if (!resp.ok) {
         if (resp.status === 401) {
-          throw new Error('未登录站点：请先打开首页 / 登录');
+          throw new Error('未登录站点：请先打开 /dilfish.html 登录');
         }
         let detail = resp.statusText;
         try {
@@ -1203,7 +1203,7 @@
       if (!resp.ok) resp = await fetch(base + '/v1/models', { headers });
       if (!resp.ok) {
         if (resp.status === 401) {
-          throw new Error('未登录站点：请先打开首页 / 登录');
+          throw new Error('未登录站点：请先打开 /dilfish.html 登录');
         }
         let detail = resp.statusText;
         try {
