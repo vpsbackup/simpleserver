@@ -31,7 +31,7 @@ func (s *MuxService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(dnet.BlockHTML))
 		return
 	}
-	if r.RequestURI != "/metrics" {
+	if r.RequestURI != "/metrics" && r.RequestURI != "/healthz" {
 		ip := r.Header["X-Real-Ip"]
 		view := "未知"
 		if len(ip) != 0 && ip[0] != "" && GlobalViewService != nil {
@@ -115,6 +115,7 @@ func InitMux() (*MuxService, error) {
 	mux.HandleFunc("/login", LoginHandler)
 	mux.HandleFunc("/logout", LogoutHandler)
 	mux.HandleFunc("/dilfish.html", DilfishHandler)
+	mux.HandleFunc("/healthz", HealthzHandler)
 
 	staticDir := Cfg.StaticDir
 	if staticDir == "" {
