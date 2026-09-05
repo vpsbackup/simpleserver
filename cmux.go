@@ -98,7 +98,7 @@ func InitMux() (*MuxService, error) {
 			return nil, errors.New("new mongo client error")
 		}
 		mux.HandleFunc("/t", CreateMsg)
-		mux.HandleFunc("/t/list", MsgList)
+		mux.HandleFunc("/t/list", MsgListRedirect)
 		mux.HandleFunc("/t/list/", MsgShow)
 	}
 

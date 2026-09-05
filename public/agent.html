@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-bs-theme="dark">
+<html lang="zh-CN" data-bs-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -7,16 +7,16 @@
 <link rel="stylesheet" href="/302/bootstrap.css">
 <style>
   :root {
-    --bg: #0d1117;
-    --bg-sidebar: #0d1117;
-    --bg-input: #1f2530;
-    --bg-hover: #1c2230;
-    --bg-user: #4a5568;
-    --text: #e6edf3;
-    --text-dim: #8b949e;
-    --border: #30363d;
-    --accent: #4d6bfe;
-    --accent-hover: #6a85ff;
+    --bg: #fafaf9;
+    --bg-sidebar: #f5f5f4;
+    --bg-input: #ffffff;
+    --bg-hover: #ebebe9;
+    --bg-user: #e7e5e4;
+    --text: #1c1917;
+    --text-dim: #78716c;
+    --border: #e7e5e4;
+    --accent: #2563eb;
+    --accent-hover: #1d4fd8;
 
     --bs-body-bg: var(--bg);
     --bs-body-color: var(--text);
@@ -90,7 +90,7 @@
     width: 26px;
     height: 26px;
     border-radius: 8px;
-    background: linear-gradient(135deg, #4d6bfe, #9b5cff);
+    background: var(--accent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -167,7 +167,7 @@
   }
 
   .chat-item:hover .del { opacity: 1; }
-  .chat-item .del:hover { color: #ff6b6b; }
+  .chat-item .del:hover { color: #b91c1c; }
 
   .sidebar-footer {
     padding: 12px 16px;
@@ -197,11 +197,11 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #f5a623;
+    background: #d97706;
     flex-shrink: 0;
   }
-  .api-status.ok { background: #3fb950; }
-  .api-status.missing { background: #f85149; }
+  .api-status.ok { background: #16a34a; }
+  .api-status.missing { background: #dc2626; }
 
   /* ========== Topbar (mobile only) ========== */
   .topbar {
@@ -271,7 +271,7 @@
     height: 56px;
     margin: 0 auto 20px;
     border-radius: 16px;
-    background: linear-gradient(135deg, #4d6bfe, #9b5cff);
+    background: var(--accent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -300,8 +300,8 @@
     margin-top: 2px;
   }
 
-  .msg.user .avatar { background: var(--bg-user); }
-  .msg.assistant .avatar { background: linear-gradient(135deg, #4d6bfe, #9b5cff); }
+  .msg.user .avatar { background: var(--bg-user); color: var(--text); }
+  .msg.assistant .avatar { background: var(--accent); }
 
   .msg .content {
     flex: 1;
@@ -331,7 +331,7 @@
   .reasoning {
     border: 1px solid var(--border);
     border-radius: 10px;
-    background: #131a26;
+    background: #f5f5f4;
     margin-bottom: 10px;
     overflow: hidden;
   }
@@ -377,7 +377,7 @@
   }
 
   .msg .content pre {
-    background: #161b22;
+    background: #f5f5f4;
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 14px 16px;
@@ -493,7 +493,7 @@
 
   .form-control:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 .2rem rgba(77, 107, 254, .25);
+    box-shadow: 0 0 0 .2rem rgba(37, 99, 235, .18);
   }
 
   .modal-content {
@@ -504,8 +504,8 @@
     font-size: 13px;
     min-height: 18px;
   }
-  .test-result.ok { color: #3fb950; }
-  .test-result.err { color: #f85149; }
+  .test-result.ok { color: #16a34a; }
+  .test-result.err { color: #dc2626; }
 
   .model-list {
     display: flex;
@@ -1090,7 +1090,7 @@
         }
       } else {
         textDiv.textContent = '';
-        textDiv.innerHTML = '<span style="color:#f85149">请求失败：' + esc(err.message) + '</span>';
+        textDiv.innerHTML = '<span style="color:#dc2626">请求失败：' + esc(err.message) + '</span>';
       }
     } finally {
       streaming = false;

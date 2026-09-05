@@ -71,6 +71,26 @@ func (mc *MongoClient) Find(filter, ret interface{}) error {
 	return nil
 }
 
+func (mc *MongoClient) FindSort(filter, sort, ret interface{}) error {
+	ctx := context.Background()
+	opts := options.Find().SetSort(sort)
+	c, err := mc.C.Find(ctx, filter, opts)
+	if err != nil {
+		log.Println("find error:", err)
+		return err
+	}
+	err = c.All(ctx, ret)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Println("document is nil")
+			return nil
+		}
+		log.Println("find one error:", filter, err)
+		return err
+	}
+	return nil
+}
+
 func (mc *MongoClient) Del(filter interface{}) error {
 	ctx := context.Background()
 	_, err := mc.C.DeleteOne(ctx, filter)

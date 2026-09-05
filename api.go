@@ -14,7 +14,7 @@ func ApiHandler(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("bad api request"))
 		return
 	}
-	task := uri[len("/api/"):]
+	task := r.URL.Path[len("/api/"):]
 	switch task {
 	case "vnstat":
 		data, err := GetVnstat()
@@ -26,13 +26,18 @@ func ApiHandler(w http.ResponseWriter, r *http.Request) {
 		bt, _ := json.Marshal(data)
 		w.Write(bt)
 		return
-	case "t":
+	case "t", "t/list":
 		if r.Method == http.MethodGet {
-			MsgList(w, r)
+			ApiMsgList(w, r)
 			return
 		}
 		if r.Method == http.MethodPost {
-			CreateMsg(w, r)
+			ApiMsgCreate(w, r)
+			return
+		}
+	case "t/delete":
+		if r.Method == http.MethodPost {
+			ApiMsgDelete(w, r)
 			return
 		}
 	}

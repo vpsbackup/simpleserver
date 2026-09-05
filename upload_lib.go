@@ -82,11 +82,33 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u.Curr = u.Curr + n
-	show := "<html lang=\"zh-cmn-Hans\"><head><meta charset=\"UTF-8\"></head><h1>上传成功！，你可以访问这里看一看:<a href=\"" + u.BaseURL + name + "\">File</a></h1>"
+	show := `<!doctype html>
+<html lang="zh-cmn-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>上传成功</title>
+    <style>
+      body { margin: 0; min-height: 100dvh; background: #fafaf9; color: #1c1917;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        display: grid; place-items: center; }
+      .card { background: #fff; border: 1px solid #e7e5e4; border-radius: 16px; padding: 24px;
+        max-width: 560px; width: calc(100% - 32px); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+      h1 { margin: 0 0 12px; font-size: 20px; }
+      p { margin: 8px 0; font-size: 14px; line-height: 1.7; word-break: break-all; }
+      a { color: #2563eb; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>上传成功 ✔</h1>
+      <p>文件访问地址：<a href="` + u.BaseURL + name + `">` + u.BaseURL + name + `</a></p>`
 	if u.JumpBackURL != "" {
-		show = show + "<h1>或者你也可以再次返回<a href=\"" + u.JumpBackURL + "\">上传页面</a></h1>"
+		show = show + `      <p>或者返回<a href="` + u.JumpBackURL + `">上传页面</a>继续。</p>`
 	}
-	show = show + "</html>"
+	show = show + `    </div>
+  </body>
+</html>`
 	if IsCurl(r) {
 		io.WriteString(w, u.BaseURL+name+"\n")
 	} else {
@@ -140,49 +162,79 @@ func (u *UploaderService) Patrol() {
 }
 
 func GetUploadPage(title, path string) string {
-	var head = `
-<!doctype html>
+	var page = `<!doctype html>
 <html lang="zh-cmn-Hans">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="">
-    <meta name="author" content="">
-
-    <title>`
-
-	var middle = `</title>
-
-    <!-- Bootstrap core CSS -->
-    <link href="/302/bootstrap.css" rel="stylesheet">
-
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#fafaf9">
+    <title>` + title + `</title>
+    <style>
+      :root {
+        --bg: #fafaf9;
+        --card: #ffffff;
+        --line: #e7e5e4;
+        --text: #1c1917;
+        --muted: #78716c;
+        --accent: #2563eb;
+        --accent-text: #ffffff;
+        --btn-bg: #f5f5f4;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      }
+      .page { max-width: 640px; margin: 0 auto; padding: max(28px, env(safe-area-inset-top)) 16px 32px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        margin-bottom: 16px;
+      }
+      h1 { margin: 0 0 16px; font-size: 20px; }
+      .file-line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      input[type="file"] { font-size: 14px; color: var(--muted); flex: 1; min-width: 200px; }
+      input[type="submit"] {
+        appearance: none;
+        border: 0;
+        border-radius: 10px;
+        background: var(--accent);
+        color: var(--accent-text);
+        font-size: 14px;
+        font-weight: 600;
+        padding: 10px 22px;
+        cursor: pointer;
+        min-height: 40px;
+      }
+      input[type="submit"]:hover { background: #1d4fd8; }
+      .hint { color: var(--muted); font-size: 13px; line-height: 1.8; margin: 0; word-break: break-all; }
+      .hint code { color: var(--accent); }
+    </style>
   </head>
   <body>
-
-    <main role="main" class="container">
-      <div class="jumbotron">
-        <h1>
-                 <form action="`
-
-	var tail = `" method="post" enctype="multipart/form-data">
-                         <input type="file" name="file"><br>
-                         <input type="submit">
-                 </form>
-	</h1>
+    <div class="page">
+      <div class="card">
+        <h1>` + title + `</h1>
+        <form action="` + path + `" method="post" enctype="multipart/form-data">
+          <div class="file-line">
+            <input type="file" name="file">
+            <input type="submit" value="上传">
+          </div>
+        </form>
       </div>
-    </main>
-
-    <main role="main" class="container">
-        <div class="jumbotron">
-            <h1>累积上传最多1G，单次最大10M</h1>
-            <h1>curl -X POST -H "Content-Type: multipart/form-data" -F "file=@filename.fileext" https://` + Cfg.Domain + `/upload</h1>
-        </div>
-    </main>
-
-    <script src="/302/jquery.js"></script>
-    <script src="/302/bootstrap.js"></script>
+      <div class="card">
+        <p class="hint">累积上传最多 1G，单次最大 10M。<br>
+        curl 也行：curl -X POST -H "Content-Type: multipart/form-data" -F "file=@filename.fileext" https://` + Cfg.Domain + `/upload</p>
+      </div>
+    </div>
   </body>
 </html>
 `
-	return head + title + middle + path + tail
+	return page
 }

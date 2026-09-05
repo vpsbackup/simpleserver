@@ -140,6 +140,10 @@ func needsAuth(r *http.Request) bool {
 		return true
 	case r.Method == http.MethodPost && path == "/t":
 		return true
+	case r.Method == http.MethodPost && path == "/api/t":
+		return true
+	case r.Method == http.MethodPost && path == "/api/t/delete":
+		return true
 	case strings.HasPrefix(path, "/v1/agentproxy/"):
 		return r.Method != http.MethodOptions
 	default:
@@ -171,20 +175,21 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow">
-  <meta name="theme-color" content="#0b1220">
+  <meta name="theme-color" content="#fafaf9">
   <title>dilfish</title>
   <link href="/302/bootstrap.css" rel="stylesheet">
   <style>
     :root {
-      --bg0: #070b14;
-      --bg1: #121a2b;
-      --card: rgba(18, 26, 43, 0.88);
-      --line: rgba(255,255,255,0.10);
-      --text: #e8eefc;
-      --muted: #93a0b8;
-      --accent: #dc3545;
-      --accent2: #6a85ff;
-      --ok: #3dd68c;
+      --bg: #fafaf9;
+      --card: #ffffff;
+      --line: #e7e5e4;
+      --text: #1c1917;
+      --muted: #78716c;
+      --accent: #2563eb;
+      --accent-text: #ffffff;
+      --ok: #16a34a;
+      --danger: #b91c1c;
+      --btn-bg: #f5f5f4;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -193,10 +198,7 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       min-height: 100dvh;
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      background:
-        radial-gradient(1200px 600px at 10% -10%, rgba(106,133,255,0.28), transparent 55%),
-        radial-gradient(900px 500px at 100% 0%, rgba(220,53,69,0.22), transparent 50%),
-        linear-gradient(160deg, var(--bg0), var(--bg1) 55%, #0a101c);
+      background: var(--bg);
     }
     .page {
       min-height: 100dvh;
@@ -226,8 +228,8 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       border-radius: 10px;
       display: grid;
       place-items: center;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-      box-shadow: 0 8px 24px rgba(106,133,255,0.25);
+      background: var(--accent);
+      color: var(--accent-text);
       font-size: 15px;
     }
     .brand-sub {
@@ -244,9 +246,9 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       padding: 8px 12px;
       border-radius: 999px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.03);
+      background: var(--btn-bg);
     }
-    .home-link:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+    .home-link:hover { color: var(--text); border-color: #d6d3d1; }
     .stage {
       flex: 1;
       display: grid;
@@ -257,8 +259,7 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 20px;
-      backdrop-filter: blur(14px);
-      box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
       padding: 28px 24px 24px;
     }
     .card h1 {
@@ -276,9 +277,9 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       margin: 0 0 14px;
       padding: 10px 12px;
       border-radius: 12px;
-      background: rgba(220,53,69,0.12);
-      border: 1px solid rgba(220,53,69,0.35);
-      color: #ffb3bb;
+      background: #fdecec;
+      border: 1px solid rgba(185,28,28,0.35);
+      color: var(--danger);
       font-size: 13px;
     }
     .auth-ok {
@@ -288,8 +289,8 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       margin-bottom: 18px;
       padding: 8px 12px;
       border-radius: 999px;
-      background: rgba(61,214,140,0.12);
-      border: 1px solid rgba(61,214,140,0.35);
+      background: #e9f7ef;
+      border: 1px solid rgba(22,163,74,0.35);
       color: var(--ok);
       font-size: 13px;
       font-weight: 650;
@@ -300,7 +301,6 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       height: 8px;
       border-radius: 50%;
       background: var(--ok);
-      box-shadow: 0 0 0 4px rgba(61,214,140,0.15);
     }
     label {
       display: block;
@@ -312,17 +312,17 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       width: 100%;
       border-radius: 12px;
       border: 1px solid var(--line);
-      background: rgba(7,11,20,0.65);
+      background: var(--bg);
       color: var(--text);
       padding: 12px 14px;
       font-size: 16px;
       outline: none;
     }
     .form-control:focus {
-      border-color: rgba(106,133,255,0.7);
-      box-shadow: 0 0 0 3px rgba(106,133,255,0.18);
+      border-color: rgba(37,99,235,0.6);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
     }
-    .form-control::placeholder { color: #6f7c94; }
+    .form-control::placeholder { color: #a8a29e; }
     .actions {
       display: flex;
       gap: 10px;
@@ -344,17 +344,16 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
     }
     .btn-main {
       flex: 1;
-      color: #fff;
-      background: linear-gradient(135deg, #e04555, #6a85ff);
-      box-shadow: 0 10px 24px rgba(220,53,69,0.25);
+      color: var(--accent-text);
+      background: var(--accent);
     }
-    .btn-main:hover { filter: brightness(1.05); }
+    .btn-main:hover { background: #1d4fd8; }
     .btn-ghost {
       color: var(--text);
-      background: rgba(255,255,255,0.04);
+      background: var(--btn-bg);
       border: 1px solid var(--line);
     }
-    .btn-ghost:hover { background: rgba(255,255,255,0.08); }
+    .btn-ghost:hover { background: #ebebe9; }
     .links {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -365,7 +364,7 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       text-decoration: none;
       color: var(--text);
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.03);
+      background: var(--card);
       border-radius: 14px;
       padding: 14px 12px;
       text-align: center;
@@ -373,8 +372,8 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
       font-weight: 600;
     }
     .links a:hover {
-      border-color: rgba(106,133,255,0.55);
-      background: rgba(106,133,255,0.08);
+      border-color: rgba(37,99,235,0.45);
+      background: #f0f6ff;
     }
     .links a span {
       display: block;
