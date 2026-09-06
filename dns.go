@@ -204,7 +204,8 @@ func DnsQueryHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // traceReferral extract delegation nameservers and glue ips from a referral msg.
-// returns (zone, nsNames, servers); servers come from glue, otherwise empty.
+// returns (zone, nsNames, servers); each server prefers A (v4) over AAAA so
+// v4-only boxes still work when both exist.
 func traceReferral(m *dns.Msg) (string, []string, []string) {
 	zone := ""
 	var nsNames []string
@@ -214,19 +215,25 @@ func traceReferral(m *dns.Msg) (string, []string, []string) {
 			nsNames = append(nsNames, ns.Ns)
 		}
 	}
-	ips := map[string]string{}
+	v4 := map[string]string{}
+	v6 := map[string]string{}
 	for _, rr := range m.Extra {
-		switch v := rr.(type) {
+		switch g := rr.(type) {
 		case *dns.A:
-			ips[strings.ToLower(v.Header().Name)] = v.A.String()
+			v4[strings.ToLower(g.Header().Name)] = g.A.String()
 		case *dns.AAAA:
-			ips[strings.ToLower(v.Header().Name)] = v.AAAA.String()
+			v6[strings.ToLower(g.Header().Name)] = g.AAAA.String()
 		}
 	}
 	var servers []string
 	seen := map[string]bool{}
 	for _, n := range nsNames {
-		if ip, ok := ips[strings.ToLower(n)]; ok && !seen[ip] {
+		key := strings.ToLower(n)
+		ip, ok := v4[key]
+		if !ok {
+			ip, ok = v6[key]
+		}
+		if ok && !seen[ip] {
 			seen[ip] = true
 			servers = append(servers, ip)
 		}

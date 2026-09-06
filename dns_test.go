@@ -120,6 +120,24 @@ func TestTraceReferral(t *testing.T) {
 		t.Errorf("servers = %v, want only glue ip", servers)
 	}
 
+	// both A and AAAA glue for the same name: A must win (v4 preference)
+	glue6 := &dns.AAAA{Hdr: dns.RR_Header{Name: "a.gtld-servers.net.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET}}
+	glue6.AAAA = []byte{0x20, 0x01, 0x50, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30}
+	m.Extra = []dns.RR{glue, glue6}
+	_, _, servers = traceReferral(m)
+	if len(servers) != 1 || servers[0] != "192.5.6.30" {
+		t.Errorf("v4 preference: servers = %v", servers)
+	}
+
+	// AAAA-only glue is used as fallback
+	glueOnly6 := &dns.AAAA{Hdr: dns.RR_Header{Name: "b.gtld-servers.net.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET}}
+	glueOnly6.AAAA = []byte{0x20, 0x01, 0x50, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 31}
+	m.Extra = []dns.RR{glueOnly6}
+	_, _, servers = traceReferral(m)
+	if len(servers) != 1 || servers[0] != "2001:5003::1f" {
+		t.Errorf("aaaa fallback: servers = %v", servers)
+	}
+
 	// no glue and no answer: servers must be empty so caller resolves NS names
 	m2 := new(dns.Msg)
 	m2.Ns = []dns.RR{ns1}
