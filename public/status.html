@@ -266,6 +266,16 @@
     return Number(n).toLocaleString("en-US");
   }
 
+  function fmtTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleString("zh-CN", {
+      timeZone: "Asia/Shanghai", hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit"
+    });
+  }
+
   function esc(s) {
     return String(s === null || s === undefined ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -345,6 +355,24 @@
     return card("服务", "", b);
   }
 
+  function renderCert(d) {
+    var c = d.cert;
+    if (!c) return "";
+    if (c.error) {
+      var eb = '<div class="empty">证书信息不可用：' + esc(c.error) + "</div>";
+      return card("TLS 证书", esc(c.path || ""), eb);
+    }
+    var b = "";
+    b += kv("使用者", esc(c.subject || "-"));
+    b += kv("证书文件", esc(c.path));
+    var left = (c.days_left === null || c.days_left === undefined) ? -1 : c.days_left;
+    var leftStyle = left <= 14 ? ' style="color:var(--danger);font-weight:700"'
+      : left <= 30 ? ' style="color:#d97706;font-weight:600"' : "";
+    b += kv("到期时间", esc(fmtTime(c.not_after)));
+    b += kv("剩余天数", '<span' + leftStyle + ">" + left + " 天</span>");
+    return card("TLS 证书", left <= 14 ? "即将到期" : "", b);
+  }
+
   function renderVnstat(d) {
     var v = d.vnstat;
     if (!v) return "";
@@ -375,7 +403,7 @@
 
   function render(d) {
     var grid = document.getElementById("grid");
-    grid.innerHTML = renderHost(d) + renderCpu(d) + renderMem(d) + renderDisks(d) + renderGo(d) + renderVnstat(d);
+    grid.innerHTML = renderHost(d) + renderCpu(d) + renderMem(d) + renderDisks(d) + renderGo(d) + renderCert(d) + renderVnstat(d);
     if (!grid.innerHTML) {
       grid.innerHTML = '<div class="card wide"><div class="empty">暂无数据</div></div>';
     }

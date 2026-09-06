@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"log"
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 
@@ -26,6 +29,7 @@ type healthzInfo struct {
 	Swap        *swapInfo   `json:"swap,omitempty"`
 	Disks       []diskInfo  `json:"disks,omitempty"`
 	Go          *goInfo     `json:"go,omitempty"`
+	Cert        *certInfo   `json:"cert,omitempty"`
 	Vnstat      *vnstatInfo `json:"vnstat,omitempty"`
 }
 
@@ -72,6 +76,14 @@ type diskInfo struct {
 type goInfo struct {
 	Version    string `json:"version"`
 	Goroutines int    `json:"goroutines"`
+}
+
+type certInfo struct {
+	Path     string    `json:"path"`
+	Subject  string    `json:"subject,omitempty"`
+	NotAfter time.Time `json:"not_after,omitempty"`
+	DaysLeft int       `json:"days_left,omitempty"`
+	Error    string    `json:"error,omitempty"`
 }
 
 type vnstatInfo struct {
@@ -203,6 +215,44 @@ func collectGo() *goInfo {
 	return &goInfo{Version: runtime.Version(), Goroutines: runtime.NumGoroutine()}
 }
 
+// collectCert read the TLS cert from quic_cert_path (same file nginx serves)
+// and report its expiry.
+func collectCert() *certInfo {
+	path := Cfg.QuicCertPath
+	if path == "" {
+		return &certInfo{Error: "quic_cert_path is not configured"}
+	}
+	info := &certInfo{Path: path}
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		info.Error = err.Error()
+		return info
+	}
+	// cert files usually hold the certificate first, but skip any
+	// non-CERTIFICATE blocks (e.g. the private key) to be safe.
+	rest := pemBytes
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			info.Error = "no CERTIFICATE pem block found"
+			return info
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		crt, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			info.Error = err.Error()
+			return info
+		}
+		info.Subject = crt.Subject.CommonName
+		info.NotAfter = crt.NotAfter
+		info.DaysLeft = int(time.Until(crt.NotAfter).Hours() / 24)
+		return info
+	}
+}
+
 func collectVnstat() *vnstatInfo {
 	vs, err := GetVnstat()
 	if err != nil {
@@ -253,7 +303,7 @@ func vnstatSummary(vs *Vnstat) *vnstatInfo {
 }
 
 // HealthzHandler reports liveness for probes: ok + uptime + build revision,
-// plus host machine info and vnstat traffic summary.
+// plus host machine info, TLS cert expiry and vnstat traffic summary.
 func HealthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	mi, si := collectMem()
@@ -267,6 +317,7 @@ func HealthzHandler(w http.ResponseWriter, r *http.Request) {
 		Swap:        si,
 		Disks:       collectDisks(),
 		Go:          collectGo(),
+		Cert:        collectCert(),
 		Vnstat:      collectVnstat(),
 	})
 }
