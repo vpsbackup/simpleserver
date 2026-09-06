@@ -144,6 +144,10 @@ func needsAuth(r *http.Request) bool {
 		return true
 	case r.Method == http.MethodPost && path == "/api/t/delete":
 		return true
+	case r.Method == http.MethodGet && path == "/api/files/list":
+		return true
+	case r.Method == http.MethodPost && path == "/api/files/delete":
+		return true
 	case strings.HasPrefix(path, "/v1/agentproxy/"):
 		return r.Method != http.MethodOptions
 	default:
@@ -433,7 +437,7 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
         <p class="lead">登录状态有效。你可以进入工具页，或在这里登出。</p>
         <div class="links">
           <a href="/agent.html">AI 助手<span>对话与模型代理</span></a>
-          <a href="/upload">上传<span>文件上传入口</span></a>
+          <a href="/upload">上传 · 文件<span>文件上传与管理</span></a>
           <a href="/t">留言<span>临时记事板</span></a>
           <a href="/">首页<span>公开介绍页</span></a>
         </div>

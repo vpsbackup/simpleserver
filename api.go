@@ -40,6 +40,16 @@ func ApiHandler(w http.ResponseWriter, r *http.Request) {
 			ApiMsgDelete(w, r)
 			return
 		}
+	case "files/list":
+		if r.Method == http.MethodGet {
+			ApiFilesList(w, r)
+			return
+		}
+	case "files/delete":
+		if r.Method == http.MethodPost {
+			ApiFilesDelete(w, r)
+			return
+		}
 	}
 	log.Println("unknown api:", uri)
 	w.Write([]byte("bad api request name"))
