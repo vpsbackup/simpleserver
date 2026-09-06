@@ -129,7 +129,10 @@ func InitMux() (*MuxService, error) {
 		log.Println("static_dir is not a directory:", staticDir)
 		return nil, errors.New("bad static_dir")
 	}
-	mux.Handle("/", http.FileServer(http.Dir(staticDir)))
+	// staticNoDirFS: serve files but never list directories (index.html only),
+	// so dirs like the upload dir /dl/ are not browsable by anonymous visitors.
+	fs := http.Dir(staticDir)
+	mux.Handle("/", staticNoDirFS{http.FileServer(fs), fs})
 
 	return &mux, nil
 }
