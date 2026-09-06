@@ -43,10 +43,15 @@ verify_host() {
   return 1
 }
 
-# 编译 + 同步 agent.html + 重启（ddeb/ats/hka 通用，需先 cd 到 checkout 并完成代码同步）
+# 编译 + 同步静态页 + 重启（ddeb/ats/hka 通用，需先 cd 到 checkout 并完成代码同步）
+# 同步 public/*.html 但跳过 index.html（各机定制品牌页）
 restart_part=$(cat <<EOF
 $GO build -o $RUNTIME/simpleserver .
-cp public/agent.html $RUNTIME/agent.html
+for f in public/*.html; do
+  b=\$(basename \$f)
+  [ "\$b" = "index.html" ] && continue
+  cp "\$f" "\$RUNTIME/\$b"
+done
 cd $RUNTIME
 pkill simpleserver 2>/dev/null || true
 sleep 1
@@ -63,7 +68,11 @@ set -e
 cd $CHECKOUT
 git pull --ff-only 2>&1 | tail -1
 $GO build -o $RUNTIME/simpleserver .
-cp public/agent.html $RUNTIME/agent.html
+for f in public/*.html; do
+  b=\$(basename \$f)
+  [ "\$b" = "index.html" ] && continue
+  cp "\$f" "\$RUNTIME/\$b"
+done
 $RUNTIME/deploy.sh
 EOF
 }
