@@ -39,6 +39,16 @@ func ApiHandler(w http.ResponseWriter, r *http.Request) {
 			ApiFilesDelete(w, r)
 			return
 		}
+	case "dns/query":
+		if r.Method == http.MethodGet {
+			DnsQueryHandler(w, r)
+			return
+		}
+	case "dns/trace":
+		if r.Method == http.MethodGet {
+			DnsTraceHandler(w, r)
+			return
+		}
 	}
 	log.Println("unknown api:", uri)
 	w.Write([]byte("bad api request name"))

@@ -439,6 +439,7 @@ func DilfishHandler(w http.ResponseWriter, r *http.Request) {
           <a href="/agent.html">AI 助手<span>对话与模型代理</span></a>
           <a href="/upload">上传 · 文件<span>文件上传与管理</span></a>
           <a href="/t">留言<span>临时记事板</span></a>
+          <a href="/dns.html">DNS 工具<span>解析与追踪</span></a>
           <a href="/status.html">状态<span>机器与流量监控</span></a>
           <a href="/">首页<span>公开介绍页</span></a>
         </div>

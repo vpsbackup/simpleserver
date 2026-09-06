@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-cmn-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#fafaf9">
+  <title>dilfish · DNS 工具</title>
+  <style>
+    :root {
+      --bg: #fafaf9;
+      --card: #ffffff;
+      --line: #e7e5e4;
+      --text: #1c1917;
+      --muted: #78716c;
+      --accent: #2563eb;
+      --accent-text: #ffffff;
+      --ok: #16a34a;
+      --danger: #b91c1c;
+      --btn-bg: #f5f5f4;
+      --input-bg: #fafaf9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+    }
+    .page { max-width: 860px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: 0.02em; }
+    .brand-mark {
+      width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+      background: var(--accent); color: var(--accent-text); font-size: 15px;
+    }
+    .brand-sub { display: block; font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 2px; }
+    .home-link {
+      color: var(--muted); text-decoration: none; font-size: 14px; padding: 8px 12px;
+      border-radius: 999px; border: 1px solid var(--line); background: var(--btn-bg);
+    }
+    .home-link:hover { color: var(--text); border-color: #d6d3d1; }
+    .mode-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .mode-tabs button {
+      appearance: none; border: 1px solid var(--line); border-radius: 999px;
+      background: var(--btn-bg); color: var(--muted);
+      padding: 8px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .mode-tabs button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04); padding: 18px; margin-bottom: 16px;
+    }
+    .query-line { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .query-line input[type="text"] {
+      flex: 2; min-width: 200px; border-radius: 10px; border: 1px solid var(--line);
+      background: var(--input-bg); color: var(--text); padding: 10px 14px;
+      font-size: 15px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .query-line input:focus { outline: 2px solid rgba(37,99,235,0.35); border-color: transparent; }
+    .query-line select {
+      border-radius: 10px; border: 1px solid var(--line); background: var(--input-bg);
+      color: var(--text); padding: 10px 12px; font-size: 14px; min-height: 42px; cursor: pointer;
+    }
+    .btn {
+      appearance: none; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--btn-bg); color: var(--text); padding: 10px 18px;
+      font-size: 14px; font-weight: 600; cursor: pointer; min-height: 42px;
+    }
+    .btn:hover { background: #ebebe9; }
+    .btn-primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+    .btn-primary:hover { background: #1d4fd8; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .hint { font-size: 12px; color: var(--muted); word-break: break-all; }
+    .meta-line { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+    .meta-line b { color: var(--text); }
+    .meta-line .rcode { font-weight: 700; }
+    .meta-line .rcode.ok { color: var(--ok); }
+    .meta-line .rcode.err { color: var(--danger); }
+    table.mini { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+    table.mini th, table.mini td { padding: 8px 8px; border-bottom: 1px dashed var(--line); text-align: left; word-break: break-all; }
+    table.mini th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    table.mini td.v { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .empty { padding: 16px; border-radius: 14px; border: 1px dashed var(--line); color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .empty a { color: var(--accent); }
+    .steps { display: flex; flex-direction: column; gap: 10px; }
+    .step {
+      border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px;
+      font-size: 13px; line-height: 1.6; background: var(--input-bg);
+    }
+    .step .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+    .step .no { color: var(--accent); font-weight: 700; }
+    .step .srv { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .step .rc { font-weight: 600; }
+    .step .rc.ok { color: var(--ok); }
+    .step .rc.err { color: var(--danger); }
+    .step .sum { color: var(--muted); word-break: break-all; }
+    .step.answer { border-color: rgba(22,163,74,0.5); background: #f0faf4; }
+    .step.error { border-color: rgba(185,28,28,0.35); background: #fdf3f3; }
+    .answer-card { border-color: rgba(22,163,74,0.5); }
+    .answer-card h2 { color: var(--ok); }
+    .toast {
+      position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+      background: var(--card); border: 1px solid var(--line); color: var(--text);
+      padding: 10px 18px; border-radius: 12px; font-size: 14px; opacity: 0; pointer-events: none;
+      transition: opacity .2s, transform .2s; z-index: 99; max-width: 86vw;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.ok { border-color: rgba(37,99,235,0.45); }
+    .toast.err { border-color: rgba(185,28,28,0.5); }
+    .foot { margin-top: 20px; text-align: center; color: var(--muted); font-size: 12px; }
+    @media (max-width: 640px) {
+      .page { padding-left: 12px; padding-right: 12px; }
+      .card { padding: 14px; border-radius: 13px; }
+      .query-line input[type="text"] { flex-basis: 100%; }
+      .query-line .btn { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">DNS</div>
+      <div>DNS 工具<span class="brand-sub">解析 · 追踪</span></div>
+    </div>
+    <a class="home-link" href="/dilfish.html">返回</a>
+  </div>
+
+  <div class="mode-tabs">
+    <button id="tab-query" class="on" type="button">解析</button>
+    <button id="tab-trace" type="button">Trace 追踪</button>
+  </div>
+
+  <div class="card">
+    <div class="query-line">
+      <input type="text" id="name" placeholder="域名，如 example.com" spellcheck="false" autocomplete="off">
+      <select id="type"></select>
+      <select id="resolver">
+        <option value="1.1.1.1">1.1.1.1</option>
+        <option value="8.8.8.8">8.8.8.8</option>
+        <option value="223.5.5.5">223.5.5.5</option>
+        <option value="119.29.29.29">119.29.29.29</option>
+        <option value="">自定义…</option>
+      </select>
+      <input type="text" id="resolver-custom" placeholder="自定义 DNS IP" spellcheck="false" autocomplete="off" style="display:none">
+      <button class="btn btn-primary" id="go" type="button">查询</button>
+    </div>
+    <div class="hint" id="mode-hint">向选定的 DNS 服务器发起一次递归查询。</div>
+  </div>
+
+  <div id="result"></div>
+
+  <div class="foot">871116.XYZ · personal access only</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var mode = 'query';
+  var TYPES = ['A', 'AAAA', 'CNAME', 'NS', 'MX', 'TXT', 'SOA', 'SRV', 'PTR', 'CAA'];
+  var busy = false;
+
+  var nameEl = document.getElementById('name');
+  var typeEl = document.getElementById('type');
+  var resolverEl = document.getElementById('resolver');
+  var customEl = document.getElementById('resolver-custom');
+  var goEl = document.getElementById('go');
+  var resultEl = document.getElementById('result');
+  var hintEl = document.getElementById('mode-hint');
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
+
+  TYPES.forEach(function (t) {
+    var o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    if (t === 'A') o.selected = true;
+    typeEl.appendChild(o);
+  });
+
+  function toast(msg, ok) {
+    toastEl.textContent = msg;
+    toastEl.className = 'toast show ' + (ok ? 'ok' : 'err');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.className = 'toast'; }, 2200);
+  }
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function currentResolver() {
+    return resolverEl.value === '' ? customEl.value.trim() : resolverEl.value;
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('tab-query').className = (m === 'query') ? 'on' : '';
+    document.getElementById('tab-trace').className = (m === 'trace') ? 'on' : '';
+    var showResolver = (m === 'query');
+    resolverEl.style.display = showResolver ? '' : 'none';
+    if (customEl.style.display !== 'none') customEl.style.display = showResolver ? '' : 'none';
+    hintEl.textContent = showResolver
+      ? '向选定的 DNS 服务器发起一次递归查询。'
+      : '从根服务器开始逐级追踪（dig +trace），可能需要几秒。';
+    resultEl.innerHTML = '';
+  }
+
+  document.getElementById('tab-query').addEventListener('click', function () { setMode('query'); });
+  document.getElementById('tab-trace').addEventListener('click', function () { setMode('trace'); });
+  resolverEl.addEventListener('change', function () {
+    customEl.style.display = resolverEl.value === '' ? '' : 'none';
+  });
+
+  function table(answers) {
+    var rows = '';
+    answers.forEach(function (a) {
+      rows += '<tr><td>' + esc(a.name) + '</td><td>' + esc(a.type) + '</td>'
+        + '<td class="v">' + esc(a.value) + '</td><td>' + a.ttl + '</td></tr>';
+    });
+    return '<table class="mini"><thead><tr><th>NAME</th><th>TYPE</th><th>VALUE</th><th>TTL</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table>';
+  }
+
+  function rcodeSpan(rc) {
+    var cls = (rc === 'NOERROR') ? 'ok' : 'err';
+    return '<span class="rcode ' + cls + '">' + esc(rc) + '</span>';
+  }
+
+  function renderQuery(d) {
+    var html = '<div class="card"><div class="meta-line">rcode: ' + rcodeSpan(d.rcode)
+      + ' · 服务器 <b>' + esc(d.resolver) + '</b> · 耗时 <b>' + d.elapsed_ms + ' ms</b></div>';
+    html += (d.answers && d.answers.length)
+      ? table(d.answers)
+      : '<div class="empty">' + (d.error ? esc(d.error) : '该类型没有返回记录') + '</div>';
+    return html + '</div>';
+  }
+
+  function renderTrace(d) {
+    var html = '<div class="card"><div class="meta-line">rcode: ' + rcodeSpan(d.rcode)
+      + ' · 共 <b>' + d.steps.length + '</b> 步 · 耗时 <b>' + d.elapsed_ms + ' ms</b></div><div class="steps">';
+    d.steps.forEach(function (s) {
+      html += '<div class="step ' + esc(s.kind) + '"><div class="head">'
+        + '<span class="no">#' + s.step + '</span>'
+        + (s.server ? '<span class="srv">@' + esc(s.server) + '</span>' : '')
+        + '<span>' + esc(s.query) + '</span>'
+        + '<span class="rc ' + (s.rcode === 'NOERROR' ? 'ok' : 'err') + '">' + esc(s.rcode) + '</span>'
+        + '<span>' + s.elapsed_ms + ' ms</span></div>'
+        + '<div class="sum">' + esc(s.summary) + '</div></div>';
+    });
+    html += '</div></div>';
+    if (d.answers && d.answers.length) {
+      html += '<div class="card answer-card"><div class="meta-line">最终答案</div>' + table(d.answers) + '</div>';
+    }
+    return html;
+  }
+
+  function run() {
+    if (busy) return;
+    var name = nameEl.value.trim();
+    if (!name) {
+      toast('先输入域名', false);
+      nameEl.focus();
+      return;
+    }
+    var resolver = (mode === 'query') ? currentResolver() : '';
+    if (mode === 'query' && resolver === '') {
+      toast('自定义 DNS 服务器 IP 不能为空', false);
+      customEl.focus();
+      return;
+    }
+    var qs = 'name=' + encodeURIComponent(name) + '&type=' + encodeURIComponent(typeEl.value)
+      + (resolver ? '&resolver=' + encodeURIComponent(resolver) : '');
+    var url = (mode === 'query') ? '/api/dns/query?' + qs : '/api/dns/trace?' + qs;
+
+    busy = true;
+    goEl.disabled = true;
+    resultEl.innerHTML = '<div class="card"><div class="empty">'
+      + (mode === 'query' ? '查询中…' : '追踪中，从根服务器逐级往下，可能需要几秒…') + '</div></div>';
+    fetch(url, { credentials: 'same-origin' })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+        return r.json();
+      })
+      .then(function (d) {
+        resultEl.innerHTML = (mode === 'query') ? renderQuery(d) : renderTrace(d);
+      })
+      .catch(function (e) {
+        resultEl.innerHTML = '<div class="card"><div class="empty">失败：' + esc(e.message) + '</div></div>';
+        toast('请求失败', false);
+      })
+      .finally(function () {
+        busy = false;
+        goEl.disabled = false;
+      });
+  }
+
+  goEl.addEventListener('click', run);
+  [nameEl, customEl].forEach(function (el) {
+    el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') run(); });
+  });
+  setMode('query');
+})();
+</script>
+</body>
+</html>
