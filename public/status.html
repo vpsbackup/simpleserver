@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="zh-cmn-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#fafaf9">
+  <title>dilfish · status</title>
+  <link href="/302/bootstrap.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #fafaf9;
+      --card: #ffffff;
+      --line: #e7e5e4;
+      --text: #1c1917;
+      --muted: #78716c;
+      --accent: #2563eb;
+      --accent-text: #ffffff;
+      --ok: #16a34a;
+      --danger: #b91c1c;
+      --btn-bg: #f5f5f4;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+    }
+    .page {
+      min-height: 100dvh;
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text);
+      font-weight: 650;
+      letter-spacing: 0.02em;
+    }
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: var(--accent);
+      color: var(--accent-text);
+      font-size: 15px;
+    }
+    .brand-sub {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 500;
+      margin-top: 2px;
+    }
+    .home-link {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--btn-bg);
+    }
+    .home-link:hover { color: var(--text); border-color: #d6d3d1; }
+    .meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .meta-row .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--ok);
+      margin-right: 6px;
+    }
+    .meta-row .dot.down { background: var(--danger); }
+    .btn-refresh {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--btn-bg);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-refresh:hover { background: #ebebe9; }
+    .error-box {
+      display: none;
+      margin: 0 0 16px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #fdecec;
+      border: 1px solid rgba(185,28,28,0.35);
+      color: var(--danger);
+      font-size: 13px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+      padding: 18px 18px 16px;
+      min-width: 0;
+    }
+    .card.wide { grid-column: 1 / -1; }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .card h2 .hint {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .kv {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 0;
+      border-bottom: 1px dashed var(--line);
+      font-size: 14px;
+    }
+    .kv:last-child { border-bottom: 0; }
+    .kv .k { color: var(--muted); flex-shrink: 0; }
+    .kv .v { text-align: right; font-variant-numeric: tabular-nums; word-break: break-all; }
+    .bar {
+      height: 8px;
+      border-radius: 999px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+    }
+    .bar-wrap { margin: 10px 0 2px; }
+    .bar-wrap .bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+    }
+    .bar-wrap .bar-label .k { color: var(--muted); }
+    table.mini {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    table.mini th, table.mini td {
+      padding: 7px 8px;
+      border-bottom: 1px dashed var(--line);
+      text-align: right;
+    }
+    table.mini th:first-child, table.mini td:first-child { text-align: left; }
+    table.mini th { color: var(--muted); font-weight: 600; }
+    .empty {
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px dashed var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .foot {
+      margin-top: 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (max-width: 640px) {
+      .page { padding-left: 16px; padding-right: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      .card { padding: 16px 14px 14px; border-radius: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <a class="brand" href="/dilfish.html">
+        <div class="brand-mark">D</div>
+        <div>
+          dilfish
+          <span class="brand-sub">status</span>
+        </div>
+      </a>
+      <a class="home-link" href="/dilfish.html">返回</a>
+    </div>
+
+    <div class="meta-row">
+      <span><span class="dot" id="dot"></span><span id="meta-text">加载中…</span></span>
+      <button class="btn-refresh" id="refresh" type="button">手动刷新</button>
+    </div>
+    <div class="error-box" id="error-box"></div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="foot">ARM.871116.XYZ · personal access only</div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+  var REFRESH_MS = 30000;
+
+  function fmtBytes(n) {
+    if (n === null || n === undefined || isNaN(n)) return "-";
+    if (n < 1024) return n + " B";
+    var units = ["KB", "MB", "GB", "TB", "PB"];
+    var v = n, i = -1;
+    do { v = v / 1024; i++; } while (v >= 1024 && i < units.length - 1);
+    return v.toFixed(v >= 100 ? 0 : 1) + " " + units[i];
+  }
+
+  function fmtUptime(s) {
+    if (s === null || s === undefined || isNaN(s)) return "-";
+    s = Math.floor(s);
+    var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    if (d > 0) return d + " 天 " + h + " 小时 " + m + " 分";
+    if (h > 0) return h + " 小时 " + m + " 分";
+    return m + " 分钟";
+  }
+
+  function fmtNum(n) {
+    if (n === null || n === undefined || isNaN(n)) return "-";
+    return Number(n).toLocaleString("en-US");
+  }
+
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function kv(k, v) {
+    return '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + v + "</span></div>";
+  }
+
+  function bar(label, used, total, pct) {
+    var p = (pct === null || pct === undefined || isNaN(pct)) ? 0 : Math.min(100, Math.max(0, pct));
+    return '<div class="bar-wrap"><div class="bar-label"><span class="k">' + esc(label) +
+      "</span><span>" + esc(used) + " / " + esc(total) + "（" + p.toFixed(1) + "%）</span></div>" +
+      '<div class="bar"><i style="width:' + p.toFixed(1) + '%"></i></div></div>';
+  }
+
+  function card(title, hint, body, wide) {
+    return '<div class="card' + (wide ? " wide" : "") + '"><h2>' + esc(title) +
+      (hint ? '<span class="hint">' + esc(hint) + "</span>" : "") + "</h2>" + body + "</div>";
+  }
+
+  function renderHost(d) {
+    var h = d.host;
+    if (!h) return "";
+    var b = "";
+    b += kv("主机名", esc(h.hostname));
+    b += kv("系统", esc(h.os) + " / " + esc(h.arch));
+    b += kv("发行版", esc(h.platform));
+    b += kv("内核", esc(h.kernel_version));
+    b += kv("开机时长", fmtUptime(h.uptime_s));
+    b += kv("进程数", fmtNum(h.procs));
+    return card("主机", "", b);
+  }
+
+  function renderCpu(d) {
+    var c = d.cpu;
+    if (!c) return "";
+    var b = "";
+    b += bar("使用率", c.percent.toFixed(1) + "%", c.num + " 核", c.percent);
+    b += kv("负载 1 / 5 / 15 分钟", [c.load1, c.load5, c.load15].map(function (x) {
+      return (x === null || x === undefined) ? "-" : x.toFixed(2);
+    }).join(" / "));
+    return card("CPU 与负载", "", b);
+  }
+
+  function renderMem(d) {
+    var m = d.mem, s = d.swap;
+    if (!m) return "";
+    var b = "";
+    b += bar("内存", fmtBytes(m.used), fmtBytes(m.total), m.used_percent);
+    b += kv("可用内存", fmtBytes(m.available));
+    if (s && s.total > 0) {
+      b += bar("交换分区", fmtBytes(s.used), fmtBytes(s.total), s.used_percent);
+    }
+    return card("内存", "", b);
+  }
+
+  function renderDisks(d) {
+    var disks = d.disks || [];
+    if (!disks.length) return "";
+    var b = "";
+    disks.forEach(function (x) {
+      b += bar(x.path, fmtBytes(x.used), fmtBytes(x.total), x.used_percent);
+    });
+    return card("磁盘", "", b);
+  }
+
+  function renderGo(d) {
+    var g = d.go;
+    if (!g) return "";
+    var b = "";
+    b += kv("Go 版本", esc(g.version));
+    b += kv("Goroutines", fmtNum(g.goroutines));
+    b += kv("服务 uptime", fmtUptime(d.uptime_s));
+    b += kv("构建版本", esc((d.vcs_revision || "").slice(0, 12) || "-"));
+    return card("服务", "", b);
+  }
+
+  function renderVnstat(d) {
+    var v = d.vnstat;
+    if (!v) return "";
+    if (!v.available) {
+      var eb = '<div class="empty">流量数据不可用：' + esc(v.error || "unknown") + "</div>";
+      return card("流量 · vnstat", "", eb, true);
+    }
+    var ifaces = v.interfaces || [];
+    var out = "";
+    ifaces.forEach(function (it) {
+      var name = it.name + (it.alias ? "（" + it.alias + "）" : "");
+      var b = "";
+      b += kv("今日 RX / TX", fmtBytes(it.today_rx) + " / " + fmtBytes(it.today_tx));
+      b += kv("本月 RX / TX", fmtBytes(it.month_rx) + " / " + fmtBytes(it.month_tx));
+      b += kv("总量 RX / TX", fmtBytes(it.total_rx) + " / " + fmtBytes(it.total_tx));
+      var days = it.days || [];
+      if (days.length) {
+        var rows = "";
+        days.forEach(function (x) {
+          rows += "<tr><td>" + esc(x.date) + "</td><td>" + fmtBytes(x.rx) + "</td><td>" + fmtBytes(x.tx) + "</td></tr>";
+        });
+        b += '<table class="mini"><thead><tr><th>日期</th><th>RX</th><th>TX</th></tr></thead><tbody>' + rows + "</tbody></table>";
+      }
+      out += card("流量 · " + name, "更新于 " + esc(it.updated), b, true);
+    });
+    return out;
+  }
+
+  function render(d) {
+    var grid = document.getElementById("grid");
+    grid.innerHTML = renderHost(d) + renderCpu(d) + renderMem(d) + renderDisks(d) + renderGo(d) + renderVnstat(d);
+    if (!grid.innerHTML) {
+      grid.innerHTML = '<div class="card wide"><div class="empty">暂无数据</div></div>';
+    }
+  }
+
+  function load() {
+    fetch("/healthz", { credentials: "same-origin" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        document.getElementById("error-box").style.display = "none";
+        document.getElementById("dot").className = "dot";
+        document.getElementById("meta-text").textContent =
+          "运行正常 · 更新于 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+        render(d);
+      })
+      .catch(function (e) {
+        var box = document.getElementById("error-box");
+        box.textContent = "获取 /healthz 失败：" + e.message;
+        box.style.display = "block";
+        document.getElementById("dot").className = "dot down";
+        document.getElementById("meta-text").textContent = "数据获取失败";
+      });
+  }
+
+  document.getElementById("refresh").addEventListener("click", load);
+  load();
+  setInterval(load, REFRESH_MS);
+})();
+</script>
+</body>
+</html>

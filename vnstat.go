@@ -1,14 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
-	"io"
 	"log"
-	"net/http"
-	"os"
+	"os/exec"
 	"strconv"
+	"sync"
+	"time"
 )
 
 type VnstatDate struct {
@@ -117,176 +117,58 @@ func TrafficString(rxtx int64) string {
 	return str
 }
 
-type PageInfo struct {
-	Key   string
-	Value string
-}
-
-type PageTrafficInfo struct {
-	Time string
-	Rx   string
-	Tx   string
-}
-
-type PageTraffic struct {
-	Name    string
-	Traffic []PageTrafficInfo
-}
-
-type PageStruct struct {
-	InfoList    []PageInfo
-	TrafficList []PageTraffic
-}
-
-type PageList struct {
-	List []PageStruct
-}
-
-func PrintVnstat(v *Vnstat) PageStruct {
-	var ps PageStruct
-	// ps.InfoList = append(ps.InfoList, PageInfo{Key: "vnstat version", Value: v.VnstatVersion})
-	// ps.InfoList = append(ps.InfoList, PageInfo{Key: "vnstat.json version", Value: v.JsonVersion})
-	for _, intf := range v.Interfaces {
-		name := intf.Name
-		if intf.Alias != "" {
-			name = name + "(" + intf.Alias + ")"
-		}
-		ps.InfoList = append(ps.InfoList, PageInfo{Key: "box name", Value: Cfg.Domain})
-		// ps.InfoList = append(ps.InfoList, PageInfo{Key: name + " created", Value: DateString(&intf.Created.Date)})
-		ps.InfoList = append(ps.InfoList, PageInfo{Key: name + " updated", Value: DateString(&intf.Updated.Date) + " " + TimeString(&intf.Updated.Time)})
-
-		var traffic PageTraffic
-
-		traffic.Traffic = nil
-		traffic.Name = "traffic of five minute of " + name
-		// 最近12个5分钟
-		if len(intf.Traffic.FiveMinute) > 12 {
-			intf.Traffic.FiveMinute = intf.Traffic.FiveMinute[len(intf.Traffic.FiveMinute)-12:]
-		}
-		for i := len(intf.Traffic.FiveMinute) - 1; i >= 0; i-- {
-			traffic.Traffic = append(traffic.Traffic, PageTrafficInfo{
-				Time: DateString(&intf.Traffic.FiveMinute[i].Date) + " " + TimeString(&intf.Traffic.FiveMinute[i].Time),
-				Rx:   TrafficString(intf.Traffic.FiveMinute[i].Rx),
-				Tx:   TrafficString(intf.Traffic.FiveMinute[i].Tx),
-			})
-		}
-		ps.TrafficList = append(ps.TrafficList, traffic)
-
-		traffic.Traffic = nil
-		traffic.Name = "traffic of day of " + name
-		// 最近7天
-		if len(intf.Traffic.Day) > 7 {
-			intf.Traffic.Day = intf.Traffic.Day[len(intf.Traffic.Day)-7:]
-		}
-		for i := len(intf.Traffic.Day) - 1; i >= 0; i-- {
-			traffic.Traffic = append(traffic.Traffic, PageTrafficInfo{
-				Time: DateString(&intf.Traffic.Day[i].Date),
-				Rx:   TrafficString(intf.Traffic.Day[i].Rx),
-				Tx:   TrafficString(intf.Traffic.Day[i].Tx),
-			})
-		}
-		ps.TrafficList = append(ps.TrafficList, traffic)
-
-		traffic.Traffic = nil
-		traffic.Name = "traffic of hour of " + name
-		// 最近12小时
-		if len(intf.Traffic.Hour) > 12 {
-			intf.Traffic.Hour = intf.Traffic.Hour[len(intf.Traffic.Hour)-12:]
-		}
-		for i := len(intf.Traffic.Hour) - 1; i >= 0; i-- {
-			traffic.Traffic = append(traffic.Traffic, PageTrafficInfo{
-				Time: DateString(&intf.Traffic.Hour[i].Date) + " " + TimeString(&intf.Traffic.Hour[i].Time),
-				Rx:   TrafficString(intf.Traffic.Hour[i].Rx),
-				Tx:   TrafficString(intf.Traffic.Hour[i].Tx),
-			})
-		}
-		ps.TrafficList = append(ps.TrafficList, traffic)
-
-		// 最近3个月
-		if len(intf.Traffic.Month) > 3 {
-			intf.Traffic.Month = intf.Traffic.Month[len(intf.Traffic.Month)-3:]
-		}
-		traffic.Traffic = nil
-		traffic.Name = "traffic of month of " + name
-		for i := len(intf.Traffic.Month) - 1; i >= 0; i-- {
-			traffic.Traffic = append(traffic.Traffic, PageTrafficInfo{
-				Time: DateString(&intf.Traffic.Month[i].Date),
-				Rx:   TrafficString(intf.Traffic.Month[i].Rx),
-				Tx:   TrafficString(intf.Traffic.Month[i].Tx),
-			})
-		}
-		ps.TrafficList = append(ps.TrafficList, traffic)
-
-		traffic.Traffic = nil
-		traffic.Name = "traffic of year of " + name
-		for i := len(intf.Traffic.Year) - 1; i >= 0; i-- {
-			traffic.Traffic = append(traffic.Traffic, PageTrafficInfo{
-				Time: DateString(&intf.Traffic.Year[i].Date),
-				Rx:   TrafficString(intf.Traffic.Year[i].Rx),
-				Tx:   TrafficString(intf.Traffic.Year[i].Tx),
-			})
-		}
-		ps.TrafficList = append(ps.TrafficList, traffic)
-
-		traffic.Traffic = nil
-		traffic.Name = "traffic of top of " + name
-		// 最近3个 top
-		if len(intf.Traffic.Top) > 3 {
-			intf.Traffic.Top = intf.Traffic.Top[:3]
-		}
-		for _, top := range intf.Traffic.Top {
-			traffic.Traffic = append(traffic.Traffic, PageTrafficInfo{
-				Time: DateString(&top.Date),
-				Rx:   TrafficString(top.Rx),
-				Tx:   TrafficString(top.Tx),
-			})
-		}
-		ps.TrafficList = append(ps.TrafficList, traffic)
-
-		traffic.Traffic = nil
-		traffic.Name = "total traffic of " + name
-		traffic.Traffic = append(traffic.Traffic, PageTrafficInfo{
-			Time: "all",
-			Rx:   TrafficString(intf.Traffic.Total.Rx),
-			Tx:   TrafficString(intf.Traffic.Total.Tx),
-		})
-		ps.TrafficList = append(ps.TrafficList, traffic)
-	}
-	return ps
-}
-
-func GetVnstat() (PageStruct, error) {
-	var data PageStruct
-	file, err := os.Open("vnstat.log")
-	if err != nil {
-		log.Println("open error:", err)
-		return data, err
-	}
-	defer file.Close()
-	bt, _ := io.ReadAll(file)
+// ParseVnstatJson parses the output of `vnstat --json`.
+func ParseVnstatJson(bt []byte) (*Vnstat, error) {
 	var vs Vnstat
-	json.Unmarshal(bt, &vs)
-	data = PrintVnstat(&vs)
-	return data, nil
+	if err := json.Unmarshal(bt, &vs); err != nil {
+		return nil, err
+	}
+	if len(vs.Interfaces) == 0 {
+		return nil, fmt.Errorf("vnstat json has no interfaces")
+	}
+	return &vs, nil
 }
 
-func VnstatHandler(w http.ResponseWriter, r *http.Request) {
-	data, err := GetVnstat()
-	if err != nil {
-		log.Println("get vnstat error:", err)
-		w.Write([]byte("no vnstat.log file"))
-		return
+// GetVnstat runs `vnstat --json` with a short timeout and caches the
+// parsed result for vnstatCacheTTL to avoid forking on every probe.
+func GetVnstat() (*Vnstat, error) {
+	vnstatCacheMu.Lock()
+	defer vnstatCacheMu.Unlock()
+	if vnstatCache != nil && time.Since(vnstatCacheAt) < vnstatCacheTTL {
+		return vnstatCache, vnstatCacheErr
 	}
-	var pl PageList
-	pl.List = append(pl.List, data)
-	t, err := template.ParseFiles("vnstat.html")
+	ctx, cancel := context.WithTimeout(context.Background(), vnstatCmdTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "vnstat", "--json").Output()
 	if err != nil {
-		log.Println("parse file error", err)
-		w.Write([]byte("no vnstat.html file"))
-		return
+		log.Println("run vnstat error:", err)
+		vnstatCache = nil
+		vnstatCacheErr = err
+		vnstatCacheAt = time.Now()
+		return nil, err
 	}
-	err = t.Execute(w, pl)
+	vs, err := ParseVnstatJson(out)
 	if err != nil {
-		log.Println("execute error:", err)
+		log.Println("parse vnstat json error:", err)
+		vnstatCache = nil
+		vnstatCacheErr = err
+		vnstatCacheAt = time.Now()
+		return nil, err
 	}
+	vnstatCache = vs
+	vnstatCacheErr = nil
+	vnstatCacheAt = time.Now()
+	return vs, nil
 }
+
+const (
+	vnstatCacheTTL   = time.Minute
+	vnstatCmdTimeout = 2 * time.Second
+)
+
+var (
+	vnstatCacheMu  sync.Mutex
+	vnstatCache    *Vnstat
+	vnstatCacheAt  time.Time
+	vnstatCacheErr error
+)

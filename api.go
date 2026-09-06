@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 )
@@ -16,16 +15,6 @@ func ApiHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	task := r.URL.Path[len("/api/"):]
 	switch task {
-	case "vnstat":
-		data, err := GetVnstat()
-		if err != nil {
-			log.Println("get api vnstat error:", err)
-			w.Write([]byte(err.Error()))
-			return
-		}
-		bt, _ := json.Marshal(data)
-		w.Write(bt)
-		return
 	case "t", "t/list":
 		if r.Method == http.MethodGet {
 			ApiMsgList(w, r)

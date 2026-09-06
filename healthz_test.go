@@ -29,6 +29,22 @@ func TestHealthzHandler(t *testing.T) {
 	if info.UptimeS < 0 {
 		t.Fatalf("bad uptime: %d", info.UptimeS)
 	}
+	if info.Host == nil || info.Host.Hostname == "" {
+		t.Fatal("expected host info with hostname")
+	}
+	if info.CPU == nil || info.CPU.Num < 1 {
+		t.Fatal("expected cpu info with at least 1 core")
+	}
+	if info.Mem == nil || info.Mem.Total == 0 {
+		t.Fatal("expected mem info with total > 0")
+	}
+	if info.Go == nil || info.Go.Version == "" {
+		t.Fatal("expected go info with version")
+	}
+	// vnstat may be unavailable locally; the field itself must always be present.
+	if info.Vnstat == nil {
+		t.Fatal("expected vnstat field in response")
+	}
 }
 
 func TestHealthzViaMux(t *testing.T) {
