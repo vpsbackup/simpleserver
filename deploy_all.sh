@@ -27,12 +27,17 @@ log()  { print -P " %F{blue}==>%f $1"; }
 good() { print -P " %F{green}✓%f $1"; }
 bad()  { print -P " %F{red}✗%f $1"; }
 
-# verify_host <domain> [expect_rev]
+# verify_host <domain> [expect_rev] [via] — via=ddeb 时从 ddeb 上 curl（ats/hka 本机可能不可达），3 次重试
 verify_host() {
-  local domain=$1 expect=${2:-$LOCAL_HEAD} rev
+  local domain=$1 expect=${2:-$LOCAL_HEAD} via=${3:-local} rev
   for i in 1 2 3; do
-    rev=$(curl -s --max-time 8 "https://$domain/healthz" 2>/dev/null |
-      python3 -c 'import json,sys; print(json.load(sys.stdin).get("vcs_revision",""))' 2>/dev/null || true)
+    if [[ "$via" == "ddeb" ]]; then
+      rev=$(ssh -o ConnectTimeout=10 ddeb "curl -s --max-time 8 https://$domain/healthz" 2>/dev/null |
+        python3 -c 'import json,sys; print(json.load(sys.stdin).get("vcs_revision",""))' 2>/dev/null || true)
+    else
+      rev=$(curl -s --max-time 8 "https://$domain/healthz" 2>/dev/null |
+        python3 -c 'import json,sys; print(json.load(sys.stdin).get("vcs_revision",""))' 2>/dev/null || true)
+    fi
     if [[ "$rev" == "$expect"* ]]; then
       good "$domain @ ${rev:0:8}"
       return 0
@@ -50,7 +55,7 @@ $GO build -o $RUNTIME/simpleserver .
 for f in public/*.html; do
   b=\$(basename \$f)
   [ "\$b" = "index.html" ] && continue
-  cp "\$f" "\$RUNTIME/\$b"
+  cp "\$f" "$RUNTIME/\$b"
 done
 cd $RUNTIME
 pkill simpleserver 2>/dev/null || true
@@ -71,7 +76,7 @@ $GO build -o $RUNTIME/simpleserver .
 for f in public/*.html; do
   b=\$(basename \$f)
   [ "\$b" = "index.html" ] && continue
-  cp "\$f" "\$RUNTIME/\$b"
+  cp "\$f" "$RUNTIME/\$b"
 done
 $RUNTIME/deploy.sh
 EOF
@@ -115,18 +120,19 @@ EOF
 case "$1" in
 arm)  deploy_arm;  verify_host arm.871116.xyz ;;
 ddeb) deploy_ddeb; verify_host deb.871116.xyz ;;
-ats)  deploy_ats;  verify_host ats.871116.xyz ;;
-hka)  deploy_hka;  verify_host hka.871116.xyz ;;
+ats)  deploy_ats;  verify_host ats.871116.xyz "" ddeb ;;
+hka)  deploy_hka;  verify_host hka.871116.xyz "" ddeb ;;
 all)
   deploy_arm;  verify_host arm.871116.xyz
   deploy_ddeb; verify_host deb.871116.xyz
-  deploy_ats;  verify_host ats.871116.xyz
-  deploy_hka;  verify_host hka.871116.xyz
+  deploy_ats;  verify_host ats.871116.xyz "" ddeb
+  deploy_hka;  verify_host hka.871116.xyz "" ddeb
   ;;
 verify)
-  for d in arm.871116.xyz deb.871116.xyz ats.871116.xyz hka.871116.xyz; do
-    verify_host "$d" || true
-  done
+  verify_host arm.871116.xyz || true
+  verify_host deb.871116.xyz || true
+  verify_host ats.871116.xyz "" ddeb || true
+  verify_host hka.871116.xyz "" ddeb || true
   print -P " %F{blue}本地 HEAD:%f ${LOCAL_HEAD:0:8}"
   ;;
 *)
