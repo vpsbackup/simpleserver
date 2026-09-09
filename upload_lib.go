@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/md5"
 	"errors"
 	"fmt"
 	dio "github.com/dilfish/tools/io"
@@ -58,6 +59,7 @@ type UploadedFileInfo struct {
 	Size    int64     `json:"size"`
 	ModTime time.Time `json:"modtime"`
 	URL     string    `json:"url"`
+	MD5     string    `json:"md5"`
 }
 
 // ListFiles read the upload dir from disk, newest first.
@@ -77,12 +79,29 @@ func (u *UploaderService) ListFiles() ([]UploadedFileInfo, int64, error) {
 			log.Println("file info error:", e.Name(), err)
 			continue
 		}
+		file, err := os.Open(filepath.Join(u.BasePath, e.Name()))
+		if err != nil {
+			log.Println("open file for md5 error:", e.Name(), err)
+			continue
+		}
+		hash := md5.New()
+		_, copyErr := io.Copy(hash, file)
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil {
+			if copyErr != nil {
+				log.Println("calculate file md5 error:", e.Name(), copyErr)
+			} else {
+				log.Println("close file after md5 error:", e.Name(), closeErr)
+			}
+			continue
+		}
 		total += info.Size()
 		out = append(out, UploadedFileInfo{
 			Name:    e.Name(),
 			Size:    info.Size(),
 			ModTime: info.ModTime(),
 			URL:     u.BaseURL + e.Name(),
+			MD5:     fmt.Sprintf("%x", hash.Sum(nil)),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ModTime.After(out[j].ModTime) })
@@ -459,6 +478,7 @@ func GetUploadPage(title, path string) string {
       html += '<article class="card file-card" data-name="' + name + '">'
         + '<div class="file-top"><span>' + escapeHtml(fmtTime(f.modtime)) + '</span><span>' + humanSize(f.size) + '</span></div>'
         + '<div class="file-title"><a href="' + escapeHtml(f.url) + '" target="_blank" rel="noopener">' + name + '</a></div>'
+        + '<div class="file-top"><span>MD5</span><span class="file-md5">' + escapeHtml(f.md5 || '未知') + '</span></div>'
         + '<div class="msg-actions">'
         + '<button class="btn" type="button" data-act="copy">拷贝链接</button>'
         + '<a class="btn" href="' + escapeHtml(f.url) + '" target="_blank" rel="noopener">打开</a>'
