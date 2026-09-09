@@ -18,6 +18,12 @@ import (
 
 const NeverExpire = time.Duration(time.Hour * 24 * 365)
 
+type fileMD5Cache struct {
+	Size    int64
+	ModTime time.Time
+	MD5     string
+}
+
 type UploaderService struct {
 	MaxSize     int64
 	MaxMem      int64
@@ -29,6 +35,43 @@ type UploaderService struct {
 	Expire      time.Duration
 	Lock        sync.Mutex
 	Map         map[string]time.Time
+	md5Mu       sync.Mutex
+	md5Cache    map[string]fileMD5Cache
+}
+
+func hashFileMD5(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+func (u *UploaderService) cachedMD5(name string, size int64, modTime time.Time) (string, bool) {
+	u.md5Mu.Lock()
+	defer u.md5Mu.Unlock()
+	c, ok := u.md5Cache[name]
+	if !ok || c.Size != size || !c.ModTime.Equal(modTime) {
+		return "", false
+	}
+	return c.MD5, true
+}
+
+func (u *UploaderService) putCachedMD5(name string, size int64, modTime time.Time, sum string) {
+	u.md5Mu.Lock()
+	u.md5Cache[name] = fileMD5Cache{Size: size, ModTime: modTime, MD5: sum}
+	u.md5Mu.Unlock()
+}
+
+func (u *UploaderService) deleteCachedMD5(name string) {
+	u.md5Mu.Lock()
+	delete(u.md5Cache, name)
+	u.md5Mu.Unlock()
 }
 
 // WriteFile write reader into file
@@ -38,7 +81,7 @@ func (u *UploaderService) WriteFile(name string, rc io.Reader) (int64, string, e
 		ext = ".noext"
 	}
 	name = dio.RandStr(u.NameLen) + ext
-	fn := u.BasePath + "/" + name
+	fn := filepath.Join(u.BasePath, name)
 	file, err := os.Create(fn)
 	if err != nil {
 		log.Println("create file name", err, "name", name)
@@ -49,8 +92,17 @@ func (u *UploaderService) WriteFile(name string, rc io.Reader) (int64, string, e
 	defer u.Lock.Unlock()
 	u.Map[fn] = time.Now().Add(u.Expire)
 	log.Println("upload file", "file name", fn, "path", u.Map[fn])
-	n, err := io.Copy(file, rc)
-	return n, name, err
+	hash := md5.New()
+	n, err := io.Copy(io.MultiWriter(file, hash), rc)
+	if err != nil {
+		return n, name, err
+	}
+	if info, statErr := file.Stat(); statErr == nil {
+		u.putCachedMD5(name, info.Size(), info.ModTime(), fmt.Sprintf("%x", hash.Sum(nil)))
+	} else {
+		log.Println("stat uploaded file for md5 cache error:", name, statErr)
+	}
+	return n, name, nil
 }
 
 // UploadedFileInfo is one entry of the upload dir for the manager API.
@@ -79,21 +131,15 @@ func (u *UploaderService) ListFiles() ([]UploadedFileInfo, int64, error) {
 			log.Println("file info error:", e.Name(), err)
 			continue
 		}
-		file, err := os.Open(filepath.Join(u.BasePath, e.Name()))
-		if err != nil {
-			log.Println("open file for md5 error:", e.Name(), err)
-			continue
-		}
-		hash := md5.New()
-		_, copyErr := io.Copy(hash, file)
-		closeErr := file.Close()
-		if copyErr != nil || closeErr != nil {
-			if copyErr != nil {
-				log.Println("calculate file md5 error:", e.Name(), copyErr)
+		sum, ok := u.cachedMD5(e.Name(), info.Size(), info.ModTime())
+		if !ok {
+			sum, err = hashFileMD5(filepath.Join(u.BasePath, e.Name()))
+			if err != nil {
+				log.Println("calculate file md5 error:", e.Name(), err)
+				sum = ""
 			} else {
-				log.Println("close file after md5 error:", e.Name(), closeErr)
+				u.putCachedMD5(e.Name(), info.Size(), info.ModTime(), sum)
 			}
-			continue
 		}
 		total += info.Size()
 		out = append(out, UploadedFileInfo{
@@ -101,7 +147,7 @@ func (u *UploaderService) ListFiles() ([]UploadedFileInfo, int64, error) {
 			Size:    info.Size(),
 			ModTime: info.ModTime(),
 			URL:     u.BaseURL + e.Name(),
-			MD5:     fmt.Sprintf("%x", hash.Sum(nil)),
+			MD5:     sum,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ModTime.After(out[j].ModTime) })
@@ -114,7 +160,7 @@ func (u *UploaderService) DeleteFile(name string) error {
 		filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 		return errors.New("bad file name")
 	}
-	fn := u.BasePath + "/" + name
+	fn := filepath.Join(u.BasePath, name)
 	info, err := os.Stat(fn)
 	if err != nil {
 		return err
@@ -132,6 +178,7 @@ func (u *UploaderService) DeleteFile(name string) error {
 		u.Curr = 0
 	}
 	u.Lock.Unlock()
+	u.deleteCachedMD5(name)
 	return nil
 }
 
@@ -222,6 +269,7 @@ func NewUploadService(baseURL, basePath, jump string, maxSize, maxTotal int64, e
 		u.NameLen = 10
 	}
 	u.Map = make(map[string]time.Time)
+	u.md5Cache = make(map[string]fileMD5Cache)
 	if expire != NeverExpire {
 		go u.Patrol()
 	}
@@ -250,7 +298,10 @@ func (u *UploaderService) Patrol() {
 			}
 			os.Remove(tb)
 			log.Println("uploader service remove", "file name", tb)
+			u.Lock.Lock()
 			delete(u.Map, tb)
+			u.Lock.Unlock()
+			u.deleteCachedMD5(filepath.Base(tb))
 		}
 	}
 }
@@ -335,6 +386,7 @@ func GetUploadPage(title, path string) string {
     .file-title { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; word-break: break-all; margin-bottom: 12px; }
     .file-title a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--line); }
     .file-title a:hover { color: var(--accent); }
+    .file-md5 { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: all; word-break: break-all; }
     .msg-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .msg-actions .btn { padding: 6px 12px; font-size: 13px; min-height: 34px; }
     .empty { text-align: center; color: var(--muted); padding: 32px 0; font-size: 14px; }
@@ -475,12 +527,13 @@ func GetUploadPage(title, path string) string {
     for (var i = 0; i < files.length; i++) {
       var f = files[i];
       var name = escapeHtml(f.name);
-      html += '<article class="card file-card" data-name="' + name + '">'
+      html += '<article class="card file-card" data-name="' + name + '" data-md5="' + escapeHtml(f.md5 || '') + '">'
         + '<div class="file-top"><span>' + escapeHtml(fmtTime(f.modtime)) + '</span><span>' + humanSize(f.size) + '</span></div>'
         + '<div class="file-title"><a href="' + escapeHtml(f.url) + '" target="_blank" rel="noopener">' + name + '</a></div>'
         + '<div class="file-top"><span>MD5</span><span class="file-md5">' + escapeHtml(f.md5 || '未知') + '</span></div>'
         + '<div class="msg-actions">'
         + '<button class="btn" type="button" data-act="copy">拷贝链接</button>'
+        + '<button class="btn" type="button" data-act="copy-md5">拷贝 MD5</button>'
         + '<a class="btn" href="' + escapeHtml(f.url) + '" target="_blank" rel="noopener">打开</a>'
         + '<button class="btn btn-danger" type="button" data-act="del">删除</button>'
         + '</div></article>';
@@ -557,6 +610,18 @@ func GetUploadPage(title, path string) string {
       var link = card.querySelector('.file-title a').href;
       copyText(link)
         .then(function () { toast('链接已拷贝', true); })
+        .catch(function (e) { toast('拷贝失败：' + e.message, false); });
+      return;
+    }
+
+    if (btn.getAttribute('data-act') === 'copy-md5') {
+      var md5 = card.getAttribute('data-md5') || '';
+      if (!md5) {
+        toast('MD5 未知', false);
+        return;
+      }
+      copyText(md5)
+        .then(function () { toast('MD5 已拷贝', true); })
         .catch(function (e) { toast('拷贝失败：' + e.message, false); });
       return;
     }
