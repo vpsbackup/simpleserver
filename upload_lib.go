@@ -37,6 +37,8 @@ type UploaderService struct {
 	Map         map[string]time.Time
 	md5Mu       sync.Mutex
 	md5Cache    map[string]fileMD5Cache
+	md5WarmMu   sync.Mutex
+	md5Warming  bool
 }
 
 func hashFileMD5(path string) (string, error) {
@@ -74,6 +76,60 @@ func (u *UploaderService) deleteCachedMD5(name string) {
 	u.md5Mu.Unlock()
 }
 
+// scheduleWarmMD5 hashes upload-dir files in the background. Coalesces overlapping runs.
+func (u *UploaderService) scheduleWarmMD5() {
+	u.md5WarmMu.Lock()
+	if u.md5Warming {
+		u.md5WarmMu.Unlock()
+		return
+	}
+	u.md5Warming = true
+	u.md5WarmMu.Unlock()
+	go func() {
+		defer func() {
+			u.md5WarmMu.Lock()
+			u.md5Warming = false
+			u.md5WarmMu.Unlock()
+		}()
+		u.warmMD5Cache()
+	}()
+}
+
+// warmMD5Cache fills md5Cache for every regular file; skips cache hits.
+func (u *UploaderService) warmMD5Cache() {
+	entries, err := os.ReadDir(u.BasePath)
+	if err != nil {
+		log.Println("warm md5 cache readdir error:", u.BasePath, err)
+		return
+	}
+	var hashed, skipped, failed int
+	start := time.Now()
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			failed++
+			log.Println("warm md5 cache info error:", e.Name(), err)
+			continue
+		}
+		if _, ok := u.cachedMD5(e.Name(), info.Size(), info.ModTime()); ok {
+			skipped++
+			continue
+		}
+		sum, err := hashFileMD5(filepath.Join(u.BasePath, e.Name()))
+		if err != nil {
+			failed++
+			log.Println("warm md5 cache hash error:", e.Name(), err)
+			continue
+		}
+		u.putCachedMD5(e.Name(), info.Size(), info.ModTime(), sum)
+		hashed++
+	}
+	log.Println("warm md5 cache done:", "hashed", hashed, "skipped", skipped, "failed", failed, "took", time.Since(start))
+}
+
 // WriteFile write reader into file
 func (u *UploaderService) WriteFile(name string, rc io.Reader) (int64, string, error) {
 	ext := filepath.Ext(name)
@@ -102,6 +158,8 @@ func (u *UploaderService) WriteFile(name string, rc io.Reader) (int64, string, e
 	} else {
 		log.Println("stat uploaded file for md5 cache error:", name, statErr)
 	}
+	// Re-scan in background so any other uncached files are filled without blocking the upload response.
+	u.scheduleWarmMD5()
 	return n, name, nil
 }
 
@@ -115,6 +173,8 @@ type UploadedFileInfo struct {
 }
 
 // ListFiles read the upload dir from disk, newest first.
+// MD5 comes only from the in-memory cache (filled at startup / after upload in background);
+// a cache miss returns an empty md5 and schedules a background warm instead of blocking.
 func (u *UploaderService) ListFiles() ([]UploadedFileInfo, int64, error) {
 	entries, err := os.ReadDir(u.BasePath)
 	if err != nil {
@@ -122,6 +182,7 @@ func (u *UploaderService) ListFiles() ([]UploadedFileInfo, int64, error) {
 	}
 	out := make([]UploadedFileInfo, 0, len(entries))
 	var total int64
+	var needWarm bool
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -133,13 +194,8 @@ func (u *UploaderService) ListFiles() ([]UploadedFileInfo, int64, error) {
 		}
 		sum, ok := u.cachedMD5(e.Name(), info.Size(), info.ModTime())
 		if !ok {
-			sum, err = hashFileMD5(filepath.Join(u.BasePath, e.Name()))
-			if err != nil {
-				log.Println("calculate file md5 error:", e.Name(), err)
-				sum = ""
-			} else {
-				u.putCachedMD5(e.Name(), info.Size(), info.ModTime(), sum)
-			}
+			needWarm = true
+			sum = ""
 		}
 		total += info.Size()
 		out = append(out, UploadedFileInfo{
@@ -149,6 +205,9 @@ func (u *UploaderService) ListFiles() ([]UploadedFileInfo, int64, error) {
 			URL:     u.BaseURL + e.Name(),
 			MD5:     sum,
 		})
+	}
+	if needWarm {
+		u.scheduleWarmMD5()
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ModTime.After(out[j].ModTime) })
 	return out, total, nil
@@ -273,6 +332,7 @@ func NewUploadService(baseURL, basePath, jump string, maxSize, maxTotal int64, e
 	if expire != NeverExpire {
 		go u.Patrol()
 	}
+	u.scheduleWarmMD5()
 	return &u
 }
 

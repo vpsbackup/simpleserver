@@ -10,7 +10,20 @@ import (
 	"time"
 )
 
-func TestListFilesMD5CacheAndKeepRowOnError(t *testing.T) {
+func waitCachedMD5(t *testing.T, u *UploaderService, name string, size int64, modTime time.Time, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if sum, ok := u.cachedMD5(name, size, modTime); ok && sum == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	sum, ok := u.cachedMD5(name, size, modTime)
+	t.Fatalf("cache not ready: ok=%v sum=%q want %q", ok, sum, want)
+}
+
+func TestListFilesUsesCacheOnlyAndSchedulesWarm(t *testing.T) {
 	dir := t.TempDir()
 	name := "hello.txt"
 	content := []byte("hello-md5-cache")
@@ -25,6 +38,7 @@ func TestListFilesMD5CacheAndKeepRowOnError(t *testing.T) {
 	want := fmt.Sprintf("%x", md5.Sum(content))
 
 	u := NewUploadService("https://example.test/dl/", dir, "", 1024, 1024*1024, NeverExpire, 5)
+	waitCachedMD5(t, u, name, info.Size(), info.ModTime(), want)
 
 	list1, total1, err := u.ListFiles()
 	if err != nil {
@@ -36,21 +50,22 @@ func TestListFilesMD5CacheAndKeepRowOnError(t *testing.T) {
 	if list1[0].MD5 != want {
 		t.Fatalf("first md5=%q want %q", list1[0].MD5, want)
 	}
-	if _, ok := u.cachedMD5(name, info.Size(), info.ModTime()); !ok {
-		t.Fatal("expected md5 cache filled after first list")
-	}
 
-	// Force miss by wrong size so ListFiles recomputes from disk.
+	// Force a miss: list must stay fast (empty md5) and still keep the row.
 	u.putCachedMD5(name, info.Size()+1, info.ModTime(), "deadbeef")
 	list2, _, err := u.ListFiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if list2[0].MD5 != want {
-		t.Fatalf("recomputed md5=%q want %q", list2[0].MD5, want)
+	if len(list2) != 1 {
+		t.Fatalf("miss list len=%d want 1", len(list2))
 	}
+	if list2[0].MD5 != "" {
+		t.Fatalf("cache miss should not block-hash; md5=%q", list2[0].MD5)
+	}
+	waitCachedMD5(t, u, name, info.Size(), info.ModTime(), want)
 
-	// Hash failure must still keep the row with empty md5.
+	// Unreadable file: keep row, empty md5.
 	gone := filepath.Join(dir, "missing-open.txt")
 	if err := os.WriteFile(gone, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -108,7 +123,6 @@ func TestWriteFileWarmsMD5CacheAndDeleteClears(t *testing.T) {
 		t.Fatalf("cached md5=%q want %q", sum, want)
 	}
 
-	// Second list should hit cache (same value).
 	list, _, err := u.ListFiles()
 	if err != nil {
 		t.Fatal(err)
@@ -123,12 +137,42 @@ func TestWriteFileWarmsMD5CacheAndDeleteClears(t *testing.T) {
 	if _, ok := u.cachedMD5(name, info.Size(), info.ModTime()); ok {
 		t.Fatal("delete should clear md5 cache")
 	}
-	// Ensure cache map entry gone even with stale key lookup.
 	u.md5Mu.Lock()
 	_, still := u.md5Cache[name]
 	u.md5Mu.Unlock()
 	if still {
 		t.Fatal("md5Cache entry still present after delete")
+	}
+}
+
+func TestWarmMD5CacheFillsExistingFiles(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("startup-warm")
+	name := "pre.txt"
+	if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%x", md5.Sum(content))
+
+	u := &UploaderService{
+		BasePath: dir,
+		BaseURL:  "https://example.test/dl/",
+		md5Cache: make(map[string]fileMD5Cache),
+	}
+	u.warmMD5Cache()
+	sum, ok := u.cachedMD5(name, info.Size(), info.ModTime())
+	if !ok || sum != want {
+		t.Fatalf("warm fill failed: ok=%v sum=%q want %q", ok, sum, want)
+	}
+	// Second warm should skip already-cached files.
+	u.warmMD5Cache()
+	sum2, ok := u.cachedMD5(name, info.Size(), info.ModTime())
+	if !ok || sum2 != want {
+		t.Fatalf("second warm broke cache: ok=%v sum=%q", ok, sum2)
 	}
 }
 

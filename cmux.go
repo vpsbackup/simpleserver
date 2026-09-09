@@ -110,6 +110,10 @@ func InitMux() (*MuxService, error) {
 	mux.HandleFunc("/memfile/", MemFileHandler)
 	mux.HandleFunc("/api/", ApiHandler)
 	mux.HandleFunc("/upload", Uploader)
+	// Eagerly build uploader so MD5 cache warm starts at process boot, not first /upload hit.
+	if Cfg.UploadDir != "" {
+		getUploader()
+	}
 	mux.HandleFunc("/v1/agentproxy/", AgentProxy)
 	mux.HandleFunc("/login", LoginHandler)
 	mux.HandleFunc("/logout", LogoutHandler)
