@@ -329,14 +329,19 @@
   .msg.assistant .content { width: 100%; }
 
   .msg-time {
+    display: block;
     font-size: 11px;
+    line-height: 1.5;
     color: var(--text-dim);
     margin-top: 4px;
     user-select: none;
+    -webkit-user-select: none;
   }
 
   .msg.assistant .msg-time { text-align: left; }
   .msg.user .msg-time { text-align: right; }
+  /* 用户气泡是 fit-content 宽度，时间需要占满整行右对齐，否则会被压缩看不见 */
+  .msg.user .content .msg-time { width: 100%; }
 
   .reasoning {
     border: 1px solid var(--border);
@@ -1182,6 +1187,8 @@
       abortController = null;
       saveHistory();
       renderHistory();
+      // 流式结束后重渲染一次，让刚收到的回复显示时间（流式节点是增量更新的，无时间行）
+      renderMessages();
       updateInputState();
       if (!settings.apiKey) {
         $modelHint.textContent = '请在设置中配置 API 密钥以开始对话';
