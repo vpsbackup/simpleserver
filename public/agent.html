@@ -317,9 +317,21 @@
     border: 1px solid var(--border);
     border-radius: 12px 12px 4px 12px;
     padding: 12px 16px;
-    max-width: 85%;
-    margin-left: auto;
     width: fit-content;
+  }
+
+  /* 用户消息：气泡和时间放进纵向容器，时间在气泡外右对齐，避免 fit-content 气泡内的 100% 宽度时间在移动端 WebKit 被压缩 */
+  .msg.user .user-box {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    max-width: 85%;
+    min-width: 0;
+  }
+
+  .msg.user .user-box .content {
+    flex: 0 0 auto;
+    max-width: 100%;
   }
 
   .msg.user { justify-content: flex-end; }
@@ -334,14 +346,12 @@
     line-height: 1.5;
     color: var(--text-dim);
     margin-top: 4px;
+    white-space: nowrap;
     user-select: none;
     -webkit-user-select: none;
   }
 
   .msg.assistant .msg-time { text-align: left; }
-  .msg.user .msg-time { text-align: right; }
-  /* 用户气泡是 fit-content 宽度，时间需要占满整行右对齐，否则会被压缩看不见 */
-  .msg.user .content .msg-time { width: 100%; }
 
   .reasoning {
     border: 1px solid var(--border);
@@ -562,7 +572,7 @@
       padding: 10px 12px;
     }
 
-    .msg.user .content { max-width: 88%; }
+    .msg.user .user-box { max-width: 88%; }
 
     .chat-item .del { opacity: 1; }
   }
@@ -894,15 +904,30 @@
     contentDiv.appendChild(text);
     // 准确时间点：本地时间，无 ts 的老数据不显示
     const timeLabel = fmtMsgTime(ts);
-    if (timeLabel) {
-      const time = document.createElement('div');
-      time.className = 'msg-time';
-      time.textContent = timeLabel;
-      time.title = new Date(ts).toLocaleString('zh-CN', { hour12: false });
-      contentDiv.appendChild(time);
+    if (role === 'user') {
+      // 用户气泡是 fit-content 宽度，时间放气泡内会被移动端 WebKit 压缩，改放到气泡外
+      const box = document.createElement('div');
+      box.className = 'user-box';
+      box.appendChild(contentDiv);
+      if (timeLabel) {
+        const time = document.createElement('div');
+        time.className = 'msg-time';
+        time.textContent = timeLabel;
+        time.title = new Date(ts).toLocaleString('zh-CN', { hour12: false });
+        box.appendChild(time);
+      }
+      div.appendChild(box);
+    } else {
+      div.appendChild(contentDiv);
+      if (timeLabel) {
+        const time = document.createElement('div');
+        time.className = 'msg-time';
+        time.textContent = timeLabel;
+        time.title = new Date(ts).toLocaleString('zh-CN', { hour12: false });
+        contentDiv.appendChild(time);
+      }
     }
     div.appendChild(avatar);
-    div.appendChild(contentDiv);
     return div;
   }
 
