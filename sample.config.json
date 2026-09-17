@@ -22,6 +22,7 @@
     "llmapi.qiniu.com",
     "llmapi.qiniu.io",
     "heilovehei.com",
+    "openrouter.ai",
     "api.fake-llm.example"
   ],
   "mongo_uri": "mongodb://demo_user:demo_pass_change_me@127.0.0.1:27017/?authSource=admin",

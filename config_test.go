@@ -16,8 +16,20 @@ func TestDefaultConfigValues(t *testing.T) {
 	if cfg.Port != 10080 || cfg.Domain == "" {
 		t.Fatalf("unexpected defaults: port=%d domain=%q", cfg.Port, cfg.Domain)
 	}
-	if len(cfg.AgentUpstreamHosts) != 3 {
+	if len(cfg.AgentUpstreamHosts) != 4 {
 		t.Fatalf("default upstream hosts=%v", cfg.AgentUpstreamHosts)
+	}
+	for _, h := range []string{"llmapi.qiniu.com", "llmapi.qiniu.io", "heilovehei.com", "openrouter.ai"} {
+		found := false
+		for _, got := range cfg.AgentUpstreamHosts {
+			if got == h {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("default upstream hosts missing %q: %v", h, cfg.AgentUpstreamHosts)
+		}
 	}
 }
 
@@ -45,6 +57,9 @@ func TestLoadConfigOmitKeysKeepDefaults(t *testing.T) {
 	}
 	if !hostAllowed("cn3.heilovehei.com") {
 		t.Fatalf("default upstream suffix should allow cn3.heilovehei.com")
+	}
+	if !hostAllowed("openrouter.ai") {
+		t.Fatalf("default upstream should allow openrouter.ai")
 	}
 }
 

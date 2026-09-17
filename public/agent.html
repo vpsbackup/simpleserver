@@ -328,6 +328,16 @@
 
   .msg.assistant .content { width: 100%; }
 
+  .msg-time {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    user-select: none;
+  }
+
+  .msg.assistant .msg-time { text-align: left; }
+  .msg.user .msg-time { text-align: right; }
+
   .reasoning {
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -638,8 +648,8 @@
         </div>
         <div class="mb-3">
           <label for="apiBase" class="form-label">API 地址</label>
-          <input type="text" class="form-control" id="apiBase" placeholder="https://cn3.heilovehei.com">
-          <div class="form-text">OpenAI 兼容接口地址，默认 https://cn3.heilovehei.com</div>
+          <input type="text" class="form-control" id="apiBase" placeholder="https://cn3.heilovehei.com 或 https://openrouter.ai/api/v1">
+          <div class="form-text">OpenAI 兼容接口地址：默认 https://cn3.heilovehei.com；OpenRouter 请填 https://openrouter.ai/api/v1（只填 https://openrouter.ai 也会自动补全）</div>
         </div>
         <div class="mb-3">
           <label for="proxy" class="form-label">服务端代理路径（可选，解决跨域）</label>
@@ -719,6 +729,19 @@
     localStorage.setItem(HISTORY_KEY, JSON.stringify(conversations));
   }
 
+  // 老数据迁移：没有 ts 的消息按顺序补一个递增时间戳，避免显示空白
+  function backfillTimestamps() {
+    let changed = false;
+    const base = Date.now();
+    conversations.forEach((c) => {
+      if (!c.createdAt) { c.createdAt = base; changed = true; }
+      (c.messages || []).forEach((m, i) => {
+        if (!m.ts) { m.ts = base + i; changed = true; }
+      });
+    });
+    if (changed) saveHistory();
+  }
+
   /* ---------- helpers ---------- */
   function esc(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -737,6 +760,22 @@
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  // 格式化消息时间戳：当天显示 HH:mm:ss，跨天显示 M-d HH:mm，跨年显示完整日期
+  function fmtMsgTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const hm = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    const sameDay = d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    if (sameDay) return hm;
+    const md = (d.getMonth() + 1) + '-' + d.getDate() + ' ' + hm;
+    if (d.getFullYear() === now.getFullYear()) return md;
+    return d.getFullYear() + '-' + md;
   }
 
   function updateApiStatus() {
@@ -807,7 +846,7 @@
       return;
     }
     conv.messages.forEach((m) => {
-      $messages.appendChild(messageNode(m.role, m.content, m.reasoning));
+      $messages.appendChild(messageNode(m.role, m.content, m.reasoning, m.ts));
     });
     scrollToBottom();
   }
@@ -823,7 +862,7 @@
     return div;
   }
 
-  function messageNode(role, content, reasoning) {
+  function messageNode(role, content, reasoning, ts) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
     const avatar = document.createElement('div');
@@ -848,6 +887,15 @@
     text.className = 'msg-text';
     text.innerHTML = escapeHtml(content) || '…';
     contentDiv.appendChild(text);
+    // 准确时间点：本地时间，无 ts 的老数据不显示
+    const timeLabel = fmtMsgTime(ts);
+    if (timeLabel) {
+      const time = document.createElement('div');
+      time.className = 'msg-time';
+      time.textContent = timeLabel;
+      time.title = new Date(ts).toLocaleString('zh-CN', { hour12: false });
+      contentDiv.appendChild(time);
+    }
     div.appendChild(avatar);
     div.appendChild(contentDiv);
     return div;
@@ -916,22 +964,47 @@
     $input.focus();
   }
 
+  function normalizeBase(raw) {
+    let base = (raw || '').trim().replace(/\/+$/, '');
+    if (!base) return '';
+    // OpenRouter 快捷兼容：用户只填 https://openrouter.ai 时自动补 /api/v1
+    try {
+      const u = new URL(base);
+      if (u.hostname === 'openrouter.ai' && !/\/api\/v\d*/.test(u.pathname)) {
+        base += '/api/v1';
+      }
+    } catch (e) { /* 保持原样，后续 fetch 会报错提示 */ }
+    return base;
+  }
+
+  function isOpenRouterBase(base) {
+    try {
+      return new URL(base).hostname === 'openrouter.ai';
+    } catch (e) { return false; }
+  }
+
   function apiUrl(path) {
     const proxy = (settings.proxy || '').trim();
     if (proxy) {
       return proxy.replace(/\/+$/, '') + path;
     }
-    return settings.apiBase.replace(/\/+$/, '') + path;
+    return normalizeBase(settings.apiBase) + path;
   }
 
-  function apiHeaders() {
+  function apiHeaders(extra) {
     const headers = {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ' + settings.apiKey
     };
     if (settings.proxy && settings.proxy.trim()) {
-      headers['x-upstream-base'] = settings.apiBase.replace(/\/+$/, '');
+      headers['x-upstream-base'] = normalizeBase(settings.apiBase);
     }
+    // OpenRouter 推荐的归因头（缺失不致命，但有助于排名/限流统计）
+    if (isOpenRouterBase(normalizeBase(settings.apiBase))) {
+      headers['HTTP-Referer'] = location.origin + location.pathname;
+      headers['X-Title'] = 'AI Assistant';
+    }
+    if (extra) Object.assign(headers, extra);
     return headers;
   }
 
@@ -945,8 +1018,8 @@
     if (conv.messages.length === 0) {
       conv.title = text.slice(0, 20) + (text.length > 20 ? '…' : '');
     }
-    conv.messages.push({ role: 'user', content: text });
-    conv.messages.push({ role: 'assistant', content: '', reasoning: '' });
+    conv.messages.push({ role: 'user', content: text, ts: Date.now() });
+    conv.messages.push({ role: 'assistant', content: '', reasoning: '', ts: Date.now() });
     saveHistory();
 
     $input.value = '';
@@ -1042,9 +1115,21 @@
           try {
             const json = JSON.parse(data);
             const delta = json.choices && json.choices[0] && json.choices[0].delta;
-            if (!delta) continue;
+            if (!delta) {
+              // OpenRouter 错误会以 SSE data 形式返回：{"error": {...}}
+              if (json.error && json.error.message) {
+                throw new Error('HTTP ' + (json.error.code || resp.status) + ': ' + json.error.message +
+                  (json.error.metadata && json.error.metadata.raw ? '（' + json.error.metadata.raw + '）' : ''));
+              }
+              continue;
+            }
 
-            if (delta.reasoning_content) {
+            // OpenRouter 推理字段是 delta.reasoning（DeepSeek 系是 reasoning_content），两者都兼容
+            const reasoningChunk = delta.reasoning || delta.reasoning_content || delta.reasoning_details;
+            if (reasoningChunk) {
+              const reasoningText = Array.isArray(reasoningChunk)
+                ? reasoningChunk.map((p) => (typeof p === 'string' ? p : (p.text || p.summary || ''))).join('')
+                : reasoningChunk;
               if (!reasoningDiv) {
                 reasoningDiv = document.createElement('details');
                 reasoningDiv.className = 'reasoning';
@@ -1058,7 +1143,7 @@
                 reasoningDiv.appendChild(reasoningBody);
                 contentDiv.insertBefore(reasoningDiv, textDiv);
               }
-              assistantMsg.reasoning = (assistantMsg.reasoning || '') + delta.reasoning_content;
+              assistantMsg.reasoning = (assistantMsg.reasoning || '') + reasoningText;
               reasoningBody.textContent = assistantMsg.reasoning;
               scrollToBottom();
             }
@@ -1137,7 +1222,7 @@
 
   async function testConnection() {
     const key = $('apiKey').value.trim();
-    const apiBase = ($('apiBase').value.trim() || 'https://cn3.heilovehei.com').replace(/\/+$/, '');
+    const apiBase = normalizeBase($('apiBase').value.trim() || 'https://cn3.heilovehei.com');
     const proxy = $('proxy').value.trim();
     const model = $('model').value.trim() || 'grok-4.5';
     const result = $('testResult');
@@ -1150,6 +1235,10 @@
         'Authorization': 'Bearer ' + key
       };
       if (proxy) headers['x-upstream-base'] = apiBase;
+      if (isOpenRouterBase(apiBase)) {
+        headers['HTTP-Referer'] = location.origin + location.pathname;
+        headers['X-Title'] = 'AI Assistant';
+      }
       const resp = await fetch(base + '/chat/completions', {
         method: 'POST',
         headers: headers,
@@ -1183,7 +1272,7 @@
 
   async function listModels() {
     const key = $('apiKey').value.trim();
-    const apiBase = ($('apiBase').value.trim() || 'https://cn3.heilovehei.com').replace(/\/+$/, '');
+    const apiBase = normalizeBase($('apiBase').value.trim() || 'https://cn3.heilovehei.com');
     const proxy = $('proxy').value.trim();
     const list = $('modelList');
     const btn = $('listModelsBtn');
@@ -1198,6 +1287,10 @@
       const base = (proxy || apiBase).replace(/\/+$/, '');
       const headers = { 'Authorization': 'Bearer ' + key };
       if (proxy) headers['x-upstream-base'] = apiBase;
+      if (isOpenRouterBase(apiBase)) {
+        headers['HTTP-Referer'] = location.origin + location.pathname;
+        headers['X-Title'] = 'AI Assistant';
+      }
 
       let resp = await fetch(base + '/models', { headers });
       if (!resp.ok) resp = await fetch(base + '/v1/models', { headers });
@@ -1240,7 +1333,7 @@
 
   function saveSettingsFromModal() {
     settings.apiKey = $('apiKey').value.trim();
-    settings.apiBase = ($('apiBase').value.trim() || 'https://cn3.heilovehei.com').replace(/\/+$/, '');
+    settings.apiBase = normalizeBase($('apiBase').value.trim() || 'https://cn3.heilovehei.com');
     settings.proxy = $('proxy').value.trim();
     settings.model = $('model').value.trim() || 'grok-4.5';
     settings.systemPrompt = $('systemPrompt').value.trim();
@@ -1277,6 +1370,7 @@
 
   /* ---------- init ---------- */
   loadState();
+  backfillTimestamps();
   updateApiStatus();
   updateInputState();
 

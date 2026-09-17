@@ -69,7 +69,7 @@ func defaultConfig() Config {
 		QuicAddr:           ":443",
 		QuicCertPath:       "/root/sh/cert.pem",
 		QuicKeyPath:        "/root/sh/priv.pem",
-		AgentUpstreamHosts: []string{"llmapi.qiniu.com", "llmapi.qiniu.io", "heilovehei.com"},
+		AgentUpstreamHosts: []string{"llmapi.qiniu.com", "llmapi.qiniu.io", "heilovehei.com", "openrouter.ai"},
 		MongoURI:           "mongodb://localhost:27017",
 		MongoDB:            "msglist",
 		MongoColl:          "msg",
@@ -255,7 +255,7 @@ Fields:
       TLS certificate file for HTTP/3.
   quic_key_path         string   default "/root/sh/priv.pem"
       TLS private key file for HTTP/3.
-  agent_upstream_hosts  []string default ["llmapi.qiniu.com","llmapi.qiniu.io","heilovehei.com"]
+  agent_upstream_hosts  []string default ["llmapi.qiniu.com","llmapi.qiniu.io","heilovehei.com","openrouter.ai"]
       Allowlist for /v1/agentproxy/ x-upstream-base Host.
       Matching: exact host or subdomain suffix (heilovehei.com allows cn3.heilovehei.com).
       Only https upstreams are accepted. Empty array denies all upstreams.
