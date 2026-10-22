@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func enableTestAuth(t *testing.T) {
@@ -153,5 +154,41 @@ func TestConfigRejectsSameAuthSecrets(t *testing.T) {
 	cfg.CookiePass = "same"
 	if err := validateConfig(cfg); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+// #21: a cookie whose embedded expiry timestamp is in the past must be
+// rejected even if the signature part is correct, and fresh/tampered values
+// must classify correctly.
+func TestAuthCookieExpiry(t *testing.T) {
+	enableTestAuth(t)
+
+	future := time.Now().Add(3600 * time.Second).Unix()
+	valid := calcAuthCookieValue(Cfg.CookiePass, authCookieKey, future)
+	past := time.Now().Add(-3600 * time.Second).Unix()
+	expired := calcAuthCookieValue(Cfg.CookiePass, authCookieKey, past)
+	tampered := func(v string) string {
+		return calcAuthCookieValue(Cfg.CookiePass, authCookieKey, future) + "x"
+	}(valid)
+
+	cases := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"fresh", valid, true},
+		{"expired", expired, false},
+		{"tampered", tampered, false},
+		{"garbage", "not-a-cookie", false},
+		{"missing", "", false},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		if tc.value != "" {
+			req.AddCookie(&http.Cookie{Name: authCookieName, Value: tc.value})
+		}
+		if got := cookieAuthorized(req); got != tc.want {
+			t.Errorf("%s cookie: cookieAuthorized = %t, want %t", tc.name, got, tc.want)
+		}
 	}
 }

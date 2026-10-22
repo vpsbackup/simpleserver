@@ -1,14 +1,15 @@
 package main
 
 import (
+	"errors"
+	"log"
 	"net"
 	"strconv"
-	"log"
 )
 
 func ListenUDP(port int) {
 	log.Println("udp listen on:", port)
-	udpAddr, err := net.ResolveUDPAddr("udp", ":" + strconv.FormatInt(int64(port), 10))
+	udpAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.FormatInt(int64(port), 10))
 	if err != nil {
 		log.Println("parse udp addr+port error:", err)
 		return
@@ -18,11 +19,19 @@ func ListenUDP(port int) {
 		log.Println("listen udp error:", udpAddr, err)
 		return
 	}
+	udpEcho(conn)
+}
 
+// udpEcho serve one bound UDP socket: reply every packet back to the sender.
+// Closing conn ends the loop (net.ErrClosed), used by tests to shut it down.
+func udpEcho(conn *net.UDPConn) {
 	for {
 		var buf [512]byte
 		n, addr, err := conn.ReadFromUDP(buf[0:])
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
 			log.Println("read udp error:", err)
 			continue
 		}

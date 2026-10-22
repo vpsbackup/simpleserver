@@ -242,9 +242,9 @@ CORS 为 `*`。
 | 编号 | 状态 | 内容 |
 |---|---|---|
 | #19 | ⬜ | `staticcheck` 9 条小问题：`mongo.NewClient`/`Connect` 已废弃、`vnstat.go` 中 `rxtx > math.MaxInt64` 恒假、多处冗余 `return`、`302` 应写 `http.StatusFound` |
-| #20 | ⬜ | `gofmt -l` 仍有 `agentproxy.go`、`udp.go` 未格式化（`go vet` 干净） |
-| #21 | ⬜ | 覆盖率 45.4%，缺 tcp/udp、上传配额与并发、auth cookie 过期、healthz 的用例；`memfile_test.go`/`tcp_test.go` 可作为表驱动模板 |
-| #22 | ⬜ | `memfile_test.go` 的 `memFileDo` 返回了 Body 已关闭的 `*http.Response`，`golangci-lint bodyclose` 会报警；可改为返回 `{status, header, body}` |
+| #20 | ✅ | `agentproxy.go`、`udp.go` 已 `gofmt -w`（`gofmt -l .` 全库干净） |
+| #21 | ✅（部分） | 新增 `udp_test.go`（echo 往返 + Close 退出）、`TestAuthCookieExpiry`（过期/篡改/垃圾/缺失 cookie）；上传配额并发与 healthz 用例已随 #2/#8 修复补过；覆盖率 45.4% → 50.5% |
+| #22 | ✅ | `memFileDo` 改为返回 `{Status, Header, Body}`，不再返回 Body 已关闭的 `*http.Response`（bodyclose 不再报警） |
 | #23 | ⬜ | `tracer.go` 是空壳：`FlightRecorder` 启动了但没人读，`/tracer` 只回 `ok`。要么实现快照下载，要么删除 |
 | #24 | ⬜ | `data.go` + `data6.go` 共 1137 行生成数据，建议挪到 JSON + `//go:embed` 或加 `go:generate` |
 | #25 | ⬜ | `deploy_all.sh`：`verify_host` 用前缀匹配且依赖本地 HEAD（本地提交未 push 时会全部误报，本轮部署已实际踩到）；`all` 遇错即停会留下半套部署；1GB 机器建议 `GOFLAGS=-p=2`；重启判定用 `sleep 2 + pgrep`，不如轮询 `/healthz` |
