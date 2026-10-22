@@ -375,13 +375,13 @@ func (u *UploaderService) DeleteFile(name string) error {
 // file and rolls the accounting back (#4).
 func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		io.WriteString(w, "Not Supported")
+		http.Error(w, "Not Supported", http.StatusMethodNotAllowed)
 		return
 	}
 	mr, err := r.MultipartReader()
 	if err != nil {
 		log.Println("parse upload body error:", err)
-		io.WriteString(w, "Read File Error:"+err.Error())
+		http.Error(w, "bad upload request", http.StatusBadRequest)
 		return
 	}
 	var uploaded int64
@@ -394,7 +394,7 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 		if perr != nil {
 			if savedName == "" {
 				log.Println("read upload part error:", perr)
-				io.WriteString(w, "Read File Error:"+perr.Error())
+				http.Error(w, "bad upload request", http.StatusBadRequest)
 				return
 			}
 			break
@@ -406,14 +406,12 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 				log.Println("write file", werr)
 				switch {
 				case errors.Is(werr, errUploadQuota):
-					u.Lock.Lock()
-					msg := fmt.Sprintf("Too many write: curr: %d, max: %d", u.Curr, u.MaxSize)
-					u.Lock.Unlock()
-					io.WriteString(w, msg)
+					// fixed text: do not echo internal counters or paths (#6)
+					http.Error(w, "upload quota exceeded", http.StatusRequestEntityTooLarge)
 				case errors.Is(werr, errUploadTooLarge):
-					io.WriteString(w, fmt.Sprintf("file too large: max %d MB", u.MaxSingleFile/1024/1024))
+					http.Error(w, "file exceeds per-file size limit", http.StatusRequestEntityTooLarge)
 				default:
-					io.WriteString(w, "write file error"+werr.Error())
+					http.Error(w, "upload failed", http.StatusInternalServerError)
 				}
 				return
 			}
@@ -423,7 +421,7 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 		part.Close() // drain every other part so the request body is consumed
 	}
 	if savedName == "" {
-		io.WriteString(w, "Read File error:no file part")
+		http.Error(w, "no file part", http.StatusBadRequest)
 		return
 	}
 	show := `<!doctype html>

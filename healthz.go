@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -123,6 +124,35 @@ func vcsRevision() string {
 		}
 	}
 	return ""
+}
+
+// cachedVCSRevision reads build info once at startup instead of per request (#8).
+var cachedVCSRevision = vcsRevision()
+
+// #8: full host/cpu/mem/disk collection on every /healthz hit is expensive for
+// an anonymous endpoint; cache the snapshot and refresh at most once per TTL.
+var (
+	healthzCacheMu  sync.Mutex
+	healthzCacheAt  time.Time
+	healthzCacheTTL = 30 * time.Second
+	healthzCache    *healthzSnapshot
+)
+
+type healthzSnapshot struct {
+	Host   *hostInfo
+	CPU    *cpuInfo
+	Mem    *memInfo
+	Swap   *swapInfo
+	Disks  []diskInfo
+	Cert   *certInfo
+	Vnstat *vnstatInfo
+}
+
+// resetHealthzCache drops the cached snapshot (test helper).
+func resetHealthzCache() {
+	healthzCacheMu.Lock()
+	healthzCache = nil
+	healthzCacheMu.Unlock()
 }
 
 func collectHost() *hostInfo {
@@ -304,20 +334,54 @@ func vnstatSummary(vs *Vnstat) *vnstatInfo {
 
 // HealthzHandler reports liveness for probes: ok + uptime + build revision,
 // plus host machine info, TLS cert expiry and vnstat traffic summary.
+// The expensive collection is cached for healthzCacheTTL (#8); machine-locale
+// fields (host/disks/cert) are only returned to authenticated requests (#8).
 func HealthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	mi, si := collectMem()
-	json.NewEncoder(w).Encode(healthzInfo{
+
+	snap := cachedHealthzSnapshot()
+	info := healthzInfo{
 		OK:          true,
 		UptimeS:     int64(time.Since(startTime).Seconds()),
-		VCSRevision: vcsRevision(),
-		Host:        collectHost(),
-		CPU:         collectCPU(),
-		Mem:         mi,
-		Swap:        si,
-		Disks:       collectDisks(),
+		VCSRevision: cachedVCSRevision,
+		Host:        snap.Host,
+		CPU:         snap.CPU,
+		Mem:         snap.Mem,
+		Swap:        snap.Swap,
+		Disks:       snap.Disks,
 		Go:          collectGo(),
-		Cert:        collectCert(),
-		Vnstat:      collectVnstat(),
-	})
+		Cert:        snap.Cert,
+		Vnstat:      snap.Vnstat,
+	}
+	if !Authorized(r) {
+		// hide hostname, kernel, disk usage and cert paths/errors from
+		// unauthenticated callers; keep the probe-visible fields (#8)
+		info.Host = nil
+		info.Disks = nil
+		info.Cert = nil
+	}
+	json.NewEncoder(w).Encode(info)
+}
+
+// cachedHealthzSnapshot returns the cached machine snapshot, refreshing it
+// when the previous one is older than healthzCacheTTL.
+func cachedHealthzSnapshot() *healthzSnapshot {
+	healthzCacheMu.Lock()
+	defer healthzCacheMu.Unlock()
+	if healthzCache != nil && time.Since(healthzCacheAt) < healthzCacheTTL {
+		return healthzCache
+	}
+	mi, si := collectMem()
+	snap := &healthzSnapshot{
+		Host:   collectHost(),
+		CPU:    collectCPU(),
+		Mem:    mi,
+		Swap:   si,
+		Disks:  collectDisks(),
+		Cert:   collectCert(),
+		Vnstat: collectVnstat(),
+	}
+	healthzCache = snap
+	healthzCacheAt = time.Now()
+	return snap
 }

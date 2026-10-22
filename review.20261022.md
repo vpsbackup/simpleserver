@@ -6,12 +6,54 @@
 - 结论：单二进制、单用户的定位下整体可用，主要风险集中在**上传链路的资源与并发正确性**、
   **未鉴权端点的放大能力**、以及**日志无限增长**。本轮先修了最影响可用性的两项（#1、#5），
   另外修了一个测试暴露出来的缓存竞争 bug。
+后续跟进：`50054c1` 修复 #2/#3/#4，`dcff4dd` 修复 #12/#13，2026-10-22 晚间再修复 #6 与 #8
+  （详见下文各条），`simpleserver.gz` 残留文件已删除（#26）。
 
 状态说明：✅ 已修复；⬜ 待处理。
 
 ---
 
 ## 一、本轮已修复
+
+### ✅ #2/#3/#4 上传链路：配额、流式落盘与失败清理（`50054c1`）
+
+- #2 配额按实际写入字节计，预留/提交/回滚全在 `u.Lock` 内，并发上传无法竞争或绕过总配额
+  （配额不再是客户端声明的 `header.Size`）；新增 `upload_quota_test.go`。
+- #3 `Handler` 改 `MultipartReader` 流式直写，不落 `/tmp`；`max_single_file_mb` 改为单文件硬上限。
+- #4 任何中途失败删除文件、清 Map、回滚已入账字节。
+- 注：并发配额用例的"恰好 4 个成功"断言过强（流式预留窗口重叠使成功数随调度浮动），
+  已改为校验不变量（`Curr ≤ 配额`、`Curr == 磁盘用量`、无残留），带 `-race` 稳定通过。
+
+### ✅ #6 上传错误路径返回正确状态码（2026-10-22 晚）
+
+位置：`upload_lib.go` `Handler`
+
+修复：非 POST 返回 405；multipart 解析失败返回 400 `bad upload request`；
+配额超限与单文件超限返回 413（固定文案 `upload quota exceeded` /
+`file exceeds per-file size limit`）；其他写失败返回 500 `upload failed`；
+缺少 file 部件返回 400 `no file part`。内部错误字符串（含路径）、配额计数不再回显客户端。
+
+### ✅ #8 /healthz 缓存 + 敏感字段鉴权门控（2026-10-22 晚）
+
+位置：`healthz.go`
+
+修复：
+
+- 全量采集（host/cpu/mem/disk/证书/vnstat）结果缓存 30s（`healthzCacheTTL`），
+  `vcsRevision()` 改为启动时读一次（`cachedVCSRevision`），`Go` 运行时信息保持每请求更新；
+- 匿名请求不再返回 `host`/`disks`/`cert`（hostname、内核、磁盘用量、证书路径与错误），
+  登录 cookie 或 `X-Site-Token` 鉴权后返回完整快照；探针关心的 `ok`/`uptime`/`vcs_revision` 匿名可见，
+  `deploy_all.sh verify` 读取的 `vcs_revision` 不受影响；
+- 新增 `TestHealthzCacheAndRedaction` 覆盖匿名裁剪、鉴权可见与 TTL 缓存行为。
+
+### ✅ #12/#13 /dl/ 下载语义与 agentproxy 收紧（`dcff4dd`）
+
+- #12 `/dl/` 强制 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`，
+  上传的 `.html`/`.svg` 不再在本站源可执行；
+- #13 agentproxy：共享 Transport 带拨号/TLS/响应头超时，上游端口仅放行 443（回环豁免），
+  CORS 收紧为同站域，`ErrorHandler` 不再回显内部错误细节。
+
+### ✅ #26 `simpleserver.gz` 已删除
 
 ### ✅ #1 TCP echo 一次只能服务一个连接（P0）
 
@@ -73,50 +115,11 @@
 
 ## 二、待处理
 
+（#2/#3/#4/#6/#8/#12/#13/#26 已修复，移入第一节。）
+
 ### P0 —— 建议下一轮就做
 
-#### ⬜ #2 上传配额存在数据竞争且可被并发绕过
-
-位置：`upload_lib.go` 配额检查与累加
-
-```go
-if u.Curr+header.Size > u.MaxSize { ... }   // 读，无锁
-...
-u.Curr = u.Curr + n                          // 写，无锁
-```
-
-`Patrol` 与 `DeleteFile` 都在 `u.Lock` 内修改 `u.Curr`，只有 `Handler` 这一处裸读写，
-是真实的 data race；同时 check 与 add 之间有 TOCTOU 窗口，并发上传可以突破总配额。
-
-建议：在锁内做「预留配额」，写失败时回滚，并在读写处统一使用同一个 mutex/atomic。
-
-#### ⬜ #3 上传没有单文件大小上限，且临时文件不清理
-
-位置：`upload_lib.go` 的 `ParseMultipartForm(u.MaxMem)`、`WriteFile`
-
-- `MaxMem` 是 multipart 的**内存**上限，不是文件大小上限。超出的部分落到 `/tmp`
-  临时文件，再由 `WriteFile` 复制到 `upload_dir`，一个大文件要占两份磁盘；
-- `ParseMultipartForm` 产生的临时文件没有 `defer r.MultipartForm.RemoveAll()`；
-- 配置项 `max_single_file_mb` 的注释写的是“单次上传大小”，实际并未生效。
-
-建议：用 `http.MaxBytesReader` 限制请求体 + 流式 `multipart.Reader` 直接写入目标文件，
-彻底不落临时盘；单文件上限与 multipart 内存上限拆成两个配置。
-
-#### ⬜ #4 写文件失败会留下残缺文件和脏 Map 条目
-
-位置：`upload_lib.go` `WriteFile`
-
-`os.Create` 后 copy 出错直接返回，既没有 `os.Remove`，`Map[fn]` 也已经写入
-（写在 copy 之前），后续列表接口会把截断文件当作正常文件展示。
-
-建议：失败路径删除文件并回滚 Map / `Curr`。
-
-#### ⬜ #6 上传错误路径统一返回 200
-
-位置：`upload_lib.go` 的 `Handler`
-
-“Too many write”“Read File Error” 都是 `io.WriteString`，HTTP 状态码为 200，
-且把内部错误字符串（含路径）原样回显。建议改为 413/500 + 固定文案。
+（原 P0 四项已全部修复，无待处理项。）
 
 ### P1 —— 安全面
 
@@ -129,7 +132,7 @@ u.Curr = u.Curr + n                          // 写，无锁
 
 建议：resolver 改为配置白名单（或删除该参数）；两个 DNS 接口加按 IP 的速率限制与结果缓存。
 
-#### ⬜ #8 `/healthz` 匿名且每次全量采集
+#### ✅ #8 `/healthz` 匿名且每次全量采集（已修复，见第一节）
 
 位置：`healthz.go` `HealthzHandler`
 
@@ -167,7 +170,7 @@ POST 全靠 `SameSite=Lax` 挡 CSRF。
 
 建议：改为“非 GET 默认需要鉴权，显式列公开例外”。
 
-#### ⬜ #12 `/dl/` 上传文件同源伺服，可造成存储型 XSS
+#### ✅ #12 `/dl/` 上传文件同源伺服，可造成存储型 XSS（已修复，见第一节）
 
 上传 `.html` / `.svg` 后访问 `/dl/<name>` 即在本站域下执行脚本。上传接口虽需登录，
 但与 cookie 鉴权同源，仍是可被利用的提权面（当前是否 inline 取决于 nginx 配置，需现场确认）。
@@ -175,7 +178,7 @@ POST 全靠 `SameSite=Lax` 挡 CSRF。
 建议：对 `/dl/` 强制 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`，
 或把上传域名与主站分离。
 
-#### ⬜ #13 agentproxy 上游调用无超时
+#### ✅ #13 agentproxy 上游调用无超时（已修复，见第一节）
 
 位置：`agentproxy.go` `AgentProxy`
 
@@ -245,7 +248,7 @@ CORS 为 `*`。
 | #23 | ⬜ | `tracer.go` 是空壳：`FlightRecorder` 启动了但没人读，`/tracer` 只回 `ok`。要么实现快照下载，要么删除 |
 | #24 | ⬜ | `data.go` + `data6.go` 共 1137 行生成数据，建议挪到 JSON + `//go:embed` 或加 `go:generate` |
 | #25 | ⬜ | `deploy_all.sh`：`verify_host` 用前缀匹配且依赖本地 HEAD（本地提交未 push 时会全部误报，本轮部署已实际踩到）；`all` 遇错即停会留下半套部署；1GB 机器建议 `GOFLAGS=-p=2`；重启判定用 `sleep 2 + pgrep`，不如轮询 `/healthz` |
-| #26 | ⬜ | 仓库遗留未跟踪文件 `simpleserver.gz`，应删除或加入 `.gitignore` |
+| #26 | ✅ | 仓库遗留未跟踪文件 `simpleserver.gz`，已删除 |
 | #27 | ⬜ | 没有 CI（无 `.github/`），`go vet + go test -count=1 ./...` 一个 workflow 即可覆盖 |
 | #28 | ⬜ | 没有 systemd unit，靠 `nohup`；机器重启后服务不会自动拉起 |
 
@@ -275,9 +278,8 @@ GOOS=linux GOARCH=amd64 build  OK
 
 ## 四、建议的后续顺序
 
-1. #2 + #3 + #4 + #6：上传链路一起改（配额原子化、流式落盘、失败清理、正确状态码），
-   顺带补并发测试；
+1. ~~#2 + #3 + #4 + #6：上传链路~~（✅ 已完成）
 2. #11 + #7：鉴权默认拒绝、DNS resolver 白名单——都是小改动、收益直接；
-3. #16 + #8：日志收敛与轮转、healthz 缓存，先把 1GB 机器的磁盘和 CPU 稳住；
+3. #16 + #8：日志收敛与轮转、healthz 缓存——~~healthz 缓存~~（✅ 已完成），剩 #16 日志收敛；
 4. #17 + #18：模板外置 + 配置项拆分，为后续改 UI 铺路；
 5. #19–#28：随日常维护逐步清理，优先补 CI 与 systemd。

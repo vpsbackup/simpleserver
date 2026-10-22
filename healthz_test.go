@@ -19,6 +19,11 @@ import (
 )
 
 func TestHealthzHandler(t *testing.T) {
+	old := Cfg
+	t.Cleanup(func() { Cfg = old })
+	Cfg = defaultConfig() // AuthPassword empty → auth disabled, full info
+	resetHealthzCache()
+
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	HealthzHandler(rr, req)
@@ -57,6 +62,89 @@ func TestHealthzHandler(t *testing.T) {
 	}
 }
 
+func TestHealthzCacheAndRedaction(t *testing.T) {
+	old := Cfg
+	t.Cleanup(func() { Cfg = old })
+	resetHealthzCache()
+
+	// anonymous client: machine-locale fields are hidden, probe fields stay (#8)
+	Cfg = defaultConfig()
+	Cfg.UploadDir = t.TempDir()
+	Cfg.AuthPassword = "sekrit"
+	initAuth(Cfg)
+	rec := httptest.NewRecorder()
+	HealthzHandler(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	var info healthzInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if !info.OK || info.Vnstat == nil || info.Mem == nil {
+		t.Fatalf("probe fields missing for anonymous client: ok=%t vnstat=%v mem=%v",
+			info.OK, info.Vnstat, info.Mem)
+	}
+	if info.Host != nil || info.Disks != nil || info.Cert != nil {
+		t.Fatalf("anonymous response leaks machine fields: host=%v disks=%v cert=%v",
+			info.Host, info.Disks, info.Cert)
+	}
+
+	// authenticated client gets the full snapshot
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req2.Header.Set("X-Site-Token", "sekrit")
+	HealthzHandler(rec2, req2)
+	var full healthzInfo
+	if err := json.Unmarshal(rec2.Body.Bytes(), &full); err != nil {
+		t.Fatal(err)
+	}
+	if full.Host == nil || full.Host.Hostname == "" {
+		t.Fatalf("authenticated response missing host info: %v", full.Host)
+	}
+
+	// within the TTL the snapshot is cached: changing the cert path config is
+	// not visible until resetHealthzCache
+	cert1 := writeTestCert(t, "one.871116.xyz", time.Now().Add(24*time.Hour))
+	Cfg.QuicCertPath = cert1
+	resetHealthzCache()
+	req3 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req3.Header.Set("X-Site-Token", "sekrit")
+	rec3 := httptest.NewRecorder()
+	HealthzHandler(rec3, req3)
+	var withCert healthzInfo
+	if err := json.Unmarshal(rec3.Body.Bytes(), &withCert); err != nil {
+		t.Fatal(err)
+	}
+	if withCert.Cert == nil || withCert.Cert.Subject != "one.871116.xyz" {
+		t.Fatalf("expected cached cert subject one.871116.xyz, got %+v", withCert.Cert)
+	}
+
+	cert2 := writeTestCert(t, "two.871116.xyz", time.Now().Add(32*24*time.Hour))
+	Cfg.QuicCertPath = cert2
+	rec4 := httptest.NewRecorder()
+	req4 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req4.Header.Set("X-Site-Token", "sekrit")
+	HealthzHandler(rec4, req4)
+	var stillCached healthzInfo
+	if err := json.Unmarshal(rec4.Body.Bytes(), &stillCached); err != nil {
+		t.Fatal(err)
+	}
+	if stillCached.Cert != nil && stillCached.Cert.Subject != "one.871116.xyz" {
+		t.Fatalf("expected stale cached cert within TTL, got %+v", stillCached.Cert)
+	}
+
+	resetHealthzCache()
+	rec5 := httptest.NewRecorder()
+	req5 := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req5.Header.Set("X-Site-Token", "sekrit")
+	HealthzHandler(rec5, req5)
+	var refreshed healthzInfo
+	if err := json.Unmarshal(rec5.Body.Bytes(), &refreshed); err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Cert == nil || refreshed.Cert.Subject != "two.871116.xyz" {
+		t.Fatalf("expected refreshed cert subject two.871116.xyz, got %+v", refreshed.Cert)
+	}
+}
+
 func TestHealthzViaMux(t *testing.T) {
 	old := Cfg
 	Cfg = defaultConfig()
@@ -67,6 +155,7 @@ func TestHealthzViaMux(t *testing.T) {
 	Cfg.Tracer = false
 	Cfg.AuthPassword = ""
 	initAuth(Cfg)
+	resetHealthzCache()
 	t.Cleanup(func() {
 		Cfg = old
 		initAuth(Cfg)

@@ -27,7 +27,7 @@
 | `GET /api/files/list`、`POST /api/files/delete` | 上传目录文件列表 / 删除 | 需登录 |
 | `GET /api/dns/query?name=&type=&resolver=` | 单次 DNS 递归查询 | 公开 |
 | `GET /api/dns/trace?name=&type=` | DNS 迭代追踪（根 → TLD → 权威） | 公开 |
-| `GET /healthz` | 存活 + 版本 + 主机/内存/磁盘/流量/证书到期（探针友好，匿名） | 公开 |
+| `GET /healthz` | 存活 + 版本 + 主机/内存/磁盘/流量/证书到期（探针友好）；匿名返回 `ok`/`uptime`/`vcs_revision`，host/disks/cert 详情需登录或 `X-Site-Token` | 公开（详情鉴权） |
 
 需要鉴权的接口支持两种方式：登录 cookie（`/dilfish.html` 登录获得），或请求头
 `X-Site-Token: <auth_password>`（curl 友好）。未登录的浏览器写请求会 302 到
