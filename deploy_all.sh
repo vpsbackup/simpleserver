@@ -9,7 +9,7 @@
 # 说明:
 #   - 跳板: 本机只直连 arm 和 ddeb；ats/hka/lsa/lse/lss/lsu 都经 ddeb 二跳
 #   - 代码同步: 所有机器都在机上 git pull --ff-only（需要各机对 GitHub 有拉取权限；
-#     跳板机首次部署没有 checkout 时会自动 clone）
+#     首次部署没有 checkout 时会自动 clone）
 #   - 编译: 各机 /usr/local/go/bin/go build -o /root/vps/www/simpleserver .
 #   - 静态文件: 只同步 public/*.html → /root/vps/www/
 #     （index.html 是各机定制品牌页，故意不覆盖）
@@ -60,6 +60,16 @@ verify_host() {
   return 1
 }
 
+# 代码同步（三处部署共用）：没有 checkout 就先 clone，然后 cd 进去
+checkout_part=$(cat <<EOF
+if [ ! -d $CHECKOUT ]; then
+  echo "首次部署，clone $REPO → $CHECKOUT"
+  git clone $REPO $CHECKOUT
+fi
+cd $CHECKOUT
+EOF
+)
+
 # 编译 + 同步静态页 + 重启（ddeb 及各跳板机通用，需先 cd 到 checkout 并完成代码同步）
 # 同步 public/*.html 但跳过 index.html（各机定制品牌页）
 restart_part=$(cat <<EOF
@@ -82,7 +92,7 @@ deploy_arm() {
   log "部署 arm (git pull + build + deploy.sh)"
   ssh -o ConnectTimeout=10 arm bash -s <<EOF
 set -e
-cd $CHECKOUT
+$checkout_part
 git pull --ff-only 2>&1 | tail -1
 $GO build -o $RUNTIME/simpleserver .
 for f in public/*.html; do
@@ -98,24 +108,19 @@ deploy_ddeb() {
   log "部署 ddeb (git pull + build + 重启)"
   ssh -o ConnectTimeout=10 ddeb bash -s <<EOF
 set -e
-cd $CHECKOUT
+$checkout_part
 git pull --ff-only 2>&1 | tail -1
 $restart_part
 EOF
 }
 
 # deploy_via_ddeb <host> — 经 ddeb 跳板：机上 git pull + build + 重启（ats/hka/lsa/lse/lss/lsu 通用）
-# 首次部署的机器没有 checkout，先 clone 一份
 deploy_via_ddeb() {
   local host=$1
   log "部署 $host (经 ddeb 跳板, git pull + build + 重启)"
   ssh -o ConnectTimeout=10 ddeb "ssh -o ConnectTimeout=10 $host bash -s" <<EOF
 set -e
-if [ ! -d $CHECKOUT ]; then
-  echo "首次部署，clone $REPO → $CHECKOUT"
-  git clone $REPO $CHECKOUT
-fi
-cd $CHECKOUT
+$checkout_part
 git pull --ff-only 2>&1 | tail -1
 $restart_part
 EOF
