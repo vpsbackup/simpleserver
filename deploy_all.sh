@@ -2,15 +2,16 @@
 # simpleserver 多机部署脚本（本地运行，不进服务器）
 #
 # 用法:
-#   ./deploy_all.sh arm | ddeb | ats | hka   部署单台
-#   ./deploy_all.sh all                      依序部署 arm → ddeb → ats → hka
-#   ./deploy_all.sh verify                   只校验四台 /healthz revision 是否等于本地 HEAD，不部署
+#   ./deploy_all.sh arm | ddeb | ats | hka | lsa | lse | lss | lsu   部署单台
+#   ./deploy_all.sh all          依序部署 arm → ddeb → ats → hka → lsa → lse → lss → lsu
+#   ./deploy_all.sh verify       只校验所有机器 /healthz revision 是否等于本地 HEAD，不部署
 #
 # 说明:
-#   - 代码同步: arm/ddeb/ats 在机上 git pull --ff-only; hka 没有 GitHub 拉取权限,
-#     从 ddeb 的 checkout 打 tar 同步（所以 all 模式下 ddeb 必须先于 hka）
+#   - 跳板: 本机只直连 arm 和 ddeb；ats/hka/lsa/lse/lss/lsu 都经 ddeb 二跳
+#   - 代码同步: 所有机器都在机上 git pull --ff-only（需要各机对 GitHub 有拉取权限；
+#     跳板机首次部署没有 checkout 时会自动 clone）
 #   - 编译: 各机 /usr/local/go/bin/go build -o /root/vps/www/simpleserver .
-#   - 静态文件: 只同步 public/agent.html → /root/vps/www/agent.html
+#   - 静态文件: 只同步 public/*.html → /root/vps/www/
 #     （index.html 是各机定制品牌页，故意不覆盖）
 #   - 重启: arm 用服务器上的 /root/vps/www/deploy.sh；其余 pkill + nohup
 #   - 校验: 部署后 curl /healthz，比对 vcs_revision 是否等于本地 HEAD（3 次重试规避重启抖动）
@@ -19,15 +20,26 @@ set -e
 cd "$(dirname "$0")"
 
 GO=/usr/local/go/bin/go
+REPO=git@github.com:vpsbackup/simpleserver.git
 CHECKOUT=/root/go/src/simpleserver
 RUNTIME=/root/vps/www
 LOCAL_HEAD=$(git rev-parse HEAD)
+# 这些机器本机不可达，统一经 ddeb 二跳
+DDEB_JUMP_HOSTS=(ats hka lsa lse lss lsu)
+
+# host_domain <host> — 各机 /healthz 域名；只有 ddeb 的域名前缀不同（deb）
+host_domain() {
+  case "$1" in
+  ddeb) print deb.871116.xyz ;;
+  *) print "$1.871116.xyz" ;;
+  esac
+}
 
 log()  { print -P " %F{blue}==>%f $1"; }
 good() { print -P " %F{green}✓%f $1"; }
 bad()  { print -P " %F{red}✗%f $1"; }
 
-# verify_host <domain> [expect_rev] [via] — via=ddeb 时从 ddeb 上 curl（ats/hka 本机可能不可达），3 次重试
+# verify_host <domain> [expect_rev] [via] — via=ddeb 时从 ddeb 上 curl（跳板机本机可能不可达），3 次重试
 verify_host() {
   local domain=$1 expect=${2:-$LOCAL_HEAD} via=${3:-local} rev
   for i in 1 2 3; do
@@ -48,7 +60,7 @@ verify_host() {
   return 1
 }
 
-# 编译 + 同步静态页 + 重启（ddeb/ats/hka 通用，需先 cd 到 checkout 并完成代码同步）
+# 编译 + 同步静态页 + 重启（ddeb 及各跳板机通用，需先 cd 到 checkout 并完成代码同步）
 # 同步 public/*.html 但跳过 index.html（各机定制品牌页）
 restart_part=$(cat <<EOF
 $GO build -o $RUNTIME/simpleserver .
@@ -92,51 +104,48 @@ $restart_part
 EOF
 }
 
-deploy_ats() {
-  log "部署 ats (经 ddeb 跳板, git pull + build + 重启)"
-  ssh -o ConnectTimeout=10 ddeb "ssh -o ConnectTimeout=10 ats bash -s" <<EOF
+# deploy_via_ddeb <host> — 经 ddeb 跳板：机上 git pull + build + 重启（ats/hka/lsa/lse/lss/lsu 通用）
+# 首次部署的机器没有 checkout，先 clone 一份
+deploy_via_ddeb() {
+  local host=$1
+  log "部署 $host (经 ddeb 跳板, git pull + build + 重启)"
+  ssh -o ConnectTimeout=10 ddeb "ssh -o ConnectTimeout=10 $host bash -s" <<EOF
 set -e
+if [ ! -d $CHECKOUT ]; then
+  echo "首次部署，clone $REPO → $CHECKOUT"
+  git clone $REPO $CHECKOUT
+fi
 cd $CHECKOUT
 git pull --ff-only 2>&1 | tail -1
 $restart_part
 EOF
 }
 
-deploy_hka() {
-  log "部署 hka (经 ddeb 跳板, tar 同步代码 + build + 重启)"
-  log "先确保 ddeb checkout 是最新的"
-  ssh -o ConnectTimeout=10 ddeb "cd $CHECKOUT && git pull --ff-only 2>&1 | tail -1"
-  log "tar 同步 ddeb → hka"
-  ssh -o ConnectTimeout=10 ddeb "cd /root/go/src && tar czf - simpleserver" |
-    ssh -o ConnectTimeout=10 ddeb "ssh -o ConnectTimeout=10 hka 'tar xzf - -C /root/go/src/'"
-  log "编译并重启 hka"
-  ssh -o ConnectTimeout=10 ddeb "ssh -o ConnectTimeout=10 hka bash -s" <<EOF
-set -e
-cd $CHECKOUT
-$restart_part
-EOF
-}
-
 case "$1" in
-arm)  deploy_arm;  verify_host arm.871116.xyz ;;
-ddeb) deploy_ddeb; verify_host deb.871116.xyz ;;
-ats)  deploy_ats;  verify_host ats.871116.xyz "" ddeb ;;
-hka)  deploy_hka;  verify_host hka.871116.xyz "" ddeb ;;
+arm)  deploy_arm;  verify_host "$(host_domain arm)" ;;
+ddeb) deploy_ddeb; verify_host "$(host_domain ddeb)" ;;
+ats | hka | lsa | lse | lss | lsu)
+  deploy_via_ddeb "$1"
+  verify_host "$(host_domain "$1")" "" ddeb
+  ;;
 all)
-  deploy_arm;  verify_host arm.871116.xyz
-  deploy_ddeb; verify_host deb.871116.xyz
-  deploy_ats;  verify_host ats.871116.xyz "" ddeb
-  deploy_hka;  verify_host hka.871116.xyz "" ddeb
+  deploy_arm;  verify_host "$(host_domain arm)"
+  deploy_ddeb; verify_host "$(host_domain ddeb)"
+  for h in "${DDEB_JUMP_HOSTS[@]}"; do
+    deploy_via_ddeb "$h"
+    verify_host "$(host_domain "$h")" "" ddeb
+  done
   ;;
 verify)
-  verify_host arm.871116.xyz || true
-  verify_host deb.871116.xyz || true
-  verify_host ats.871116.xyz "" ddeb || true
-  verify_host hka.871116.xyz "" ddeb || true
+  verify_host "$(host_domain arm)" || true
+  verify_host "$(host_domain ddeb)" || true
+  for h in "${DDEB_JUMP_HOSTS[@]}"; do
+    verify_host "$(host_domain "$h")" "" ddeb || true
+  done
   print -P " %F{blue}本地 HEAD:%f ${LOCAL_HEAD:0:8}"
   ;;
 *)
-  print "用法: $0 arm|ddeb|ats|hka|all|verify"
+  print "用法: $0 arm|ddeb|ats|hka|lsa|lse|lss|lsu|all|verify"
   exit 1
   ;;
 esac

@@ -67,14 +67,14 @@ go test -count=1 ./...   # 全部离线，不打真实网络
 
 ## 部署
 
-四台机器（arm / ddeb / ats / hka），本地一键：
+八台机器（arm / ddeb / ats / hka / lsa / lse / lss / lsu），本地一键：
 
 ```sh
-./deploy_all.sh all      # 依序 arm → ddeb → ats → hka
+./deploy_all.sh all      # 依序 arm → ddeb → ats → hka → lsa → lse → lss → lsu
 ./deploy_all.sh arm      # 单台
-./deploy_all.sh verify   # 只读校验四台 revision 是否等于本地 HEAD
+./deploy_all.sh verify   # 只读校验各台 revision 是否等于本地 HEAD
 ```
 
-注意：arm/ddeb/ats 在机上 `git pull`；hka 无 GitHub 拉取权限，从 ddeb tar 同步
-（所以 `all` 模式下 ddeb 先于 hka）。`public/*.html` 会同步到服务器运行目录，
-但 `index.html` 例外——各机器页脚品牌不同，是按机器定制的。
+本机只直连 arm 和 ddeb，其余机器都经 ddeb 二跳；所有机器都在机上 `git pull`。
+`public/*.html` 会同步到服务器运行目录，但 `index.html` 例外——各机器页脚品牌不同，
+是按机器定制的。
