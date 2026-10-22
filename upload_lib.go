@@ -124,6 +124,13 @@ func (u *UploaderService) warmMD5Cache() {
 			log.Println("warm md5 cache hash error:", e.Name(), err)
 			continue
 		}
+		// 哈希期间文件可能还在写入（刚上传），这个结果对不上当前大小/mtime，丢弃，
+		// 让上传路径自己写入正确的缓存，避免后完成的 warm 覆盖新值。
+		if cur, statErr := os.Stat(filepath.Join(u.BasePath, e.Name())); statErr != nil ||
+			cur.Size() != info.Size() || !cur.ModTime().Equal(info.ModTime()) {
+			skipped++
+			continue
+		}
 		u.putCachedMD5(e.Name(), info.Size(), info.ModTime(), sum)
 		hashed++
 	}

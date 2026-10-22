@@ -78,3 +78,7 @@ go test -count=1 ./...   # 全部离线，不打真实网络
 本机只直连 arm 和 ddeb，其余机器都经 ddeb 二跳；所有机器都在机上 `git pull`。
 `public/*.html` 会同步到服务器运行目录，但 `index.html` 例外——各机器页脚品牌不同，
 是按机器定制的。
+
+服务收到 `SIGTERM`（`pkill` 的默认信号）时会停止接收新连接，并最多等 10 秒让
+在途请求结束；HTTP 侧读请求头超时 10 秒、空闲连接 90 秒，上传/SSE 这类长请求
+不受 ReadTimeout 限制。

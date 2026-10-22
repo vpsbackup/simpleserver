@@ -1,0 +1,283 @@
+# simpleserver 代码审查（2026-10-22）
+
+- 审查范围：仓库内全部 Go 代码（约 7300 行，不含 `public/` 静态资源）
+- 审查方式：人工通读 + `go vet` / `staticcheck` / `golangci-lint` + `go test -cover`
+- 当时基线：`df368fe`（memfile 与部署脚本改造合并后）
+- 结论：单二进制、单用户的定位下整体可用，主要风险集中在**上传链路的资源与并发正确性**、
+  **未鉴权端点的放大能力**、以及**日志无限增长**。本轮先修了最影响可用性的两项（#1、#5），
+  另外修了一个测试暴露出来的缓存竞争 bug。
+
+状态说明：✅ 已修复；⬜ 待处理。
+
+---
+
+## 一、本轮已修复
+
+### ✅ #1 TCP echo 一次只能服务一个连接（P0）
+
+位置：`tcp.go`（旧实现 `handleTcp(conn)` 在 `Accept` 循环里同步调用）
+
+问题：任意一个客户端连上后不发数据，`handleTcp` 里的 `conn.Read` 永久阻塞，
+整个 `Accept` 循环停摆，10082 端口后续连接全部排队。默认配置 `tcp_port = 10082`
+是开启的，所以线上一直存在。
+
+修复：
+
+- 每个连接 `go handleTcp(conn)`，accept 循环不再被单个连接占用；
+- 用带缓冲 channel 做信号量，限制并发连接 512，超出直接 close；
+- 每条连接设置 60s 读/写空闲超时，读超时属于正常回收，不记日志；
+- `Accept` 遇到 `net.ErrClosed` 正常返回，读 buffer 移到循环外复用；
+- 抽出 `ServeTCP(ls *net.TCPListener)` 便于测试。
+
+新增 `tcp_test.go`：echo 正确性、空闲连接不阻塞其他连接（回归用例）、
+空闲超时回收、连接数打满时丢弃。
+
+### ✅ #5 HTTP 超时、优雅退出与退出码（P0）
+
+位置：`main.go`、`quic.go`
+
+问题：
+
+- `http.ListenAndServe` 没有任何超时，而 HTTP/3 直接监听 udp/443 对公网；
+- 没有信号处理，重启时在途请求被硬断；
+- `InitMux` 失败时 `return`，进程退出码为 0，巡检/systemd 认为启动成功。
+
+修复：
+
+- `http.Server` 增加 `ReadHeaderTimeout = 10s`、`IdleTimeout = 90s`（大于 nginx
+  默认 `keepalive_timeout` 75s）。**刻意不设 `ReadTimeout`/`WriteTimeout`**：
+  100MB 上传和 SSE 流式代理会被直接掐断；
+- `signal.NotifyContext(SIGINT, SIGTERM)` + `srv.Shutdown(10s)`，超时再 `Close()`。
+  部署脚本里的 `pkill` 默认就是 SIGTERM，现在会先排空在途请求；
+- `InitMux` 失败、任一听者异常退出（端口占用、证书损坏）都以退出码 1 结束；
+- `quic.go` 从 `http3.ListenAndServeQUIC`（出错 panic 在 goroutine 里）改为
+  `NewHTTP3Server()` 预加载证书并返回 `*http3.Server`，由 main 统一启动与关闭；
+- 配置校验补充：`quic_only` 必须配合 `use_quic`，否则两个 listener 都不启动、进程空转。
+
+新增 `quic_test.go`：证书缺失时报错、正常证书下 `Addr`/`TLSConfig`/`NextProtos` 正确。
+进程级验证见文末。
+
+### ✅ 附加：md5 缓存预热与新上传竞争
+
+位置：`upload_lib.go`（`warmMD5Cache`）
+
+现象：`TestWriteFileWarmsMD5CacheAndDeleteClears` 偶发失败（约在 20 次全量测试中出现一次）。
+
+原因：启动时或上传后触发的后台预热可能在文件写到一半时取到旧的 size/mtime，
+算完哈希后把结果写回缓存，覆盖掉上传路径刚写入的正确条目。
+
+修复：哈希完成后重新 `Stat`，大小或 mtime 与开始时不一致则丢弃该结果，
+交给上传路径自己写缓存。`go test -count=5` 与 `-race` 均稳定通过。
+
+---
+
+## 二、待处理
+
+### P0 —— 建议下一轮就做
+
+#### ⬜ #2 上传配额存在数据竞争且可被并发绕过
+
+位置：`upload_lib.go` 配额检查与累加
+
+```go
+if u.Curr+header.Size > u.MaxSize { ... }   // 读，无锁
+...
+u.Curr = u.Curr + n                          // 写，无锁
+```
+
+`Patrol` 与 `DeleteFile` 都在 `u.Lock` 内修改 `u.Curr`，只有 `Handler` 这一处裸读写，
+是真实的 data race；同时 check 与 add 之间有 TOCTOU 窗口，并发上传可以突破总配额。
+
+建议：在锁内做「预留配额」，写失败时回滚，并在读写处统一使用同一个 mutex/atomic。
+
+#### ⬜ #3 上传没有单文件大小上限，且临时文件不清理
+
+位置：`upload_lib.go` 的 `ParseMultipartForm(u.MaxMem)`、`WriteFile`
+
+- `MaxMem` 是 multipart 的**内存**上限，不是文件大小上限。超出的部分落到 `/tmp`
+  临时文件，再由 `WriteFile` 复制到 `upload_dir`，一个大文件要占两份磁盘；
+- `ParseMultipartForm` 产生的临时文件没有 `defer r.MultipartForm.RemoveAll()`；
+- 配置项 `max_single_file_mb` 的注释写的是“单次上传大小”，实际并未生效。
+
+建议：用 `http.MaxBytesReader` 限制请求体 + 流式 `multipart.Reader` 直接写入目标文件，
+彻底不落临时盘；单文件上限与 multipart 内存上限拆成两个配置。
+
+#### ⬜ #4 写文件失败会留下残缺文件和脏 Map 条目
+
+位置：`upload_lib.go` `WriteFile`
+
+`os.Create` 后 copy 出错直接返回，既没有 `os.Remove`，`Map[fn]` 也已经写入
+（写在 copy 之前），后续列表接口会把截断文件当作正常文件展示。
+
+建议：失败路径删除文件并回滚 Map / `Curr`。
+
+#### ⬜ #6 上传错误路径统一返回 200
+
+位置：`upload_lib.go` 的 `Handler`
+
+“Too many write”“Read File Error” 都是 `io.WriteString`，HTTP 状态码为 200，
+且把内部错误字符串（含路径）原样回显。建议改为 413/500 + 固定文案。
+
+### P1 —— 安全面
+
+#### ⬜ #7 `/api/dns/query` 的 `resolver` 参数可指向任意 IP
+
+位置：`dns.go` `DnsQueryHandler`
+
+只做了 `net.ParseIP` 校验，匿名用户可让服务器向任意地址的 53 端口发查询，
+可被用于内网探测或当作开放 DNS 转发器。`/api/dns/trace` 单请求最长 12s，也没有限速。
+
+建议：resolver 改为配置白名单（或删除该参数）；两个 DNS 接口加按 IP 的速率限制与结果缓存。
+
+#### ⬜ #8 `/healthz` 匿名且每次全量采集
+
+位置：`healthz.go` `HealthzHandler`
+
+每次请求都会执行 gopsutil 的 host/cpu/mem/disk、读取证书文件、调用一次
+`debug.ReadBuildInfo`。公开端点 + 高频探针 = 持续开销；同时暴露 hostname、内核版本、
+磁盘用量、证书路径与错误信息。
+
+建议：结果缓存 15–30s（vnstat 已有 1 分钟缓存，可参照 `vnstatCacheTTL`），
+`vcsRevision()` 启动时算一次；敏感字段只在鉴权后返回。
+
+#### ⬜ #9 `/ip` 把请求头原样回显，包括 Cookie
+
+位置：`cfip.go` `CFIPHandler`
+
+遍历 `r.Header` 全量输出，`Cookie`、`Authorization` 也会出现在页面/JSON 里
+（自己的凭证，分享截图即泄漏）。`auth.go` 已有 `redactHeaders`，这里没用上。
+另外 `RenderHTML` 每个请求都 `template.ParseFiles`。
+
+建议：用 `redactHeaders` 过滤敏感头；模板启动时解析一次（或 `//go:embed`）。
+
+#### ⬜ #10 登录没有失败限速
+
+位置：`auth.go` `LoginHandler`
+
+`passwordMatch` 是常数时间比较，但没有失败计数/退避，可无限在线爆破。
+POST 全靠 `SameSite=Lax` 挡 CSRF。
+
+建议：按 IP 做失败退避/锁定；写操作统一校验 `Origin`。
+
+#### ⬜ #11 `needsAuth` 是白名单，新增路由默认无保护
+
+位置：`auth.go` `needsAuth`
+
+目前是“列出来的才鉴权”，以后新增一个 `POST /api/xxx` 忘记登记就直接裸奔。
+
+建议：改为“非 GET 默认需要鉴权，显式列公开例外”。
+
+#### ⬜ #12 `/dl/` 上传文件同源伺服，可造成存储型 XSS
+
+上传 `.html` / `.svg` 后访问 `/dl/<name>` 即在本站域下执行脚本。上传接口虽需登录，
+但与 cookie 鉴权同源，仍是可被利用的提权面（当前是否 inline 取决于 nginx 配置，需现场确认）。
+
+建议：对 `/dl/` 强制 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`，
+或把上传域名与主站分离。
+
+#### ⬜ #13 agentproxy 上游调用无超时
+
+位置：`agentproxy.go` `AgentProxy`
+
+使用默认 `http.Transport`，没有 `ResponseHeaderTimeout`/`DialContext` 超时；
+每个请求新建一次 `ReverseProxy`；`ErrorHandler` 把内部错误文本直接回给客户端；
+CORS 为 `*`。
+
+建议：复用带超时的 Transport，限制上游端口为 443，错误信息结构化且不回显细节。
+
+### P2 —— 性能与可运维性
+
+#### ⬜ #14 留言列表无分页，`MsgShow` 用 RequestURI 取 id
+
+- `msg.go` `ApiMsgList`：`FindSort` 没有 limit/skip，Mongo 侧也没有 `createAt` 索引，
+  数据量上去后是全表扫描 + 全量内存；
+- `msg.go` `MsgShow` 用 `r.RequestURI[len("/t/list/"):]`，`/t/list/<id>?x=1` 会查不到；
+- `view.go` `Handle` 同样用 `RequestURI`，`/ip/1.2.3.4?x=1` 解析失败。
+
+建议：加 limit/skip 与总数、建索引；路径解析统一用 `r.URL.Path`（与 memfile 修复一致）。
+
+#### ⬜ #15 Mongo 查询没有超时
+
+位置：`mongo.go`
+
+`Find` / `FindSort` / `Del` 都用 `context.Background()`，Mongo 一慢就挂死 handler。
+`mongo.NewClient` + `client.Connect` 在驱动 1.17 已废弃。
+
+建议：统一 `context.WithTimeout`（或透传 `r.Context()`），改用 `mongo.Connect` + `Ping`。
+
+#### ⬜ #16 日志量是当前最大的运维风险
+
+- 每请求 2 行 + 整个 header map（`cmux.go`）
+- UDP echo 每个包 2 行（`udp.go`）、TCP 每次读 1 行（旧 `tcp.go`，本轮已去掉）
+- 归属地未命中每次一条（`range_tree.go`、`bsearch.go`）——IPv6 访客几乎每次请求都命中
+- 部署脚本 `>>1.txt 2>>2.txt`，没有轮转
+
+建议：默认只记错误、访问日志合并为单行 JSON 或采样、加 `logrotate`/lumberjack。
+
+#### ⬜ #17 三个页面的大段 HTML 内联在 Go 字符串里
+
+`auth.go`（登录页）、`page_msg.go`、`upload_lib.go`（上传页）。
+
+带来两个具体问题：
+
+1. 无法格式化/lint，改样式要动 Go 字符串；
+2. 文案与配置漂移：上传页写死“单次最大 10M · 累积 10G”，配置默认是 100MB / 10GB；
+   登录页页脚写死 `ARM.871116.XYZ`，其余 7 台机器的品牌是错的。
+
+建议：`//go:embed public/*.html` + `html/template`，文案从 `Cfg` 注入；
+页脚品牌跟随 `Cfg.Domain` 或每机 `index.html` 的约定。
+
+#### ⬜ #18 `MaxSingleFileMB` 一个字段承担两种语义
+
+位置：`config.go` → `upload_lib.go` 的 `ParseMultipartForm`
+
+既被当作单文件上限（实际未生效），又被当作 multipart 内存上限（100MB × 并发
+会打爆 1GB 内存的机器）。建议拆成 `max_single_file_mb` 与 `multipart_memory_mb`（默认 8–16MB）。
+
+### P3 —— 代码质量与工程化
+
+| 编号 | 状态 | 内容 |
+|---|---|---|
+| #19 | ⬜ | `staticcheck` 9 条小问题：`mongo.NewClient`/`Connect` 已废弃、`vnstat.go` 中 `rxtx > math.MaxInt64` 恒假、多处冗余 `return`、`302` 应写 `http.StatusFound` |
+| #20 | ⬜ | `gofmt -l` 仍有 `agentproxy.go`、`udp.go` 未格式化（`go vet` 干净） |
+| #21 | ⬜ | 覆盖率 45.4%，缺 tcp/udp、上传配额与并发、auth cookie 过期、healthz 的用例；`memfile_test.go`/`tcp_test.go` 可作为表驱动模板 |
+| #22 | ⬜ | `memfile_test.go` 的 `memFileDo` 返回了 Body 已关闭的 `*http.Response`，`golangci-lint bodyclose` 会报警；可改为返回 `{status, header, body}` |
+| #23 | ⬜ | `tracer.go` 是空壳：`FlightRecorder` 启动了但没人读，`/tracer` 只回 `ok`。要么实现快照下载，要么删除 |
+| #24 | ⬜ | `data.go` + `data6.go` 共 1137 行生成数据，建议挪到 JSON + `//go:embed` 或加 `go:generate` |
+| #25 | ⬜ | `deploy_all.sh`：`verify_host` 用前缀匹配且依赖本地 HEAD（本地提交未 push 时会全部误报，本轮部署已实际踩到）；`all` 遇错即停会留下半套部署；1GB 机器建议 `GOFLAGS=-p=2`；重启判定用 `sleep 2 + pgrep`，不如轮询 `/healthz` |
+| #26 | ⬜ | 仓库遗留未跟踪文件 `simpleserver.gz`，应删除或加入 `.gitignore` |
+| #27 | ⬜ | 没有 CI（无 `.github/`），`go vet + go test -count=1 ./...` 一个 workflow 即可覆盖 |
+| #28 | ⬜ | 没有 systemd unit，靠 `nohup`；机器重启后服务不会自动拉起 |
+
+---
+
+## 三、本轮验证记录
+
+```
+go build ./...                 BUILD_OK
+go vet ./...                   VET_OK
+go test -count=1 ./...         ok   simpleserver   0.906s
+go test -count=5 ./...         ok（确认 md5 用例不再偶发失败）
+go test -count=1 -race ./...   ok（顺带发现并修掉了 tcp 测试里的全局变量竞争）
+gofmt -l                       改动文件全部干净
+GOOS=linux GOARCH=amd64 build  OK
+```
+
+进程级验证（临时配置，未触碰线上）：
+
+| 场景 | 结果 |
+| --- | --- |
+| `GET /healthz`、`GET /agent.html` | 200 |
+| `kill -TERM` | 退出码 0，日志 `shutdown signal received, draining connections` |
+| 配置非法（`port = 70000`） | 退出码 1 |
+| `static_dir` 不存在 | 退出码 1 |
+| 端口被占用 | 退出码 1，日志 `serve error: ... address already in use` |
+
+## 四、建议的后续顺序
+
+1. #2 + #3 + #4 + #6：上传链路一起改（配额原子化、流式落盘、失败清理、正确状态码），
+   顺带补并发测试；
+2. #11 + #7：鉴权默认拒绝、DNS resolver 白名单——都是小改动、收益直接；
+3. #16 + #8：日志收敛与轮转、healthz 缓存，先把 1GB 机器的磁盘和 CPU 稳住；
+4. #17 + #18：模板外置 + 配置项拆分，为后续改 UI 铺路；
+5. #19–#28：随日常维护逐步清理，优先补 CI 与 systemd。

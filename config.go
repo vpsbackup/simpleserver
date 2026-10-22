@@ -135,6 +135,9 @@ func validateConfig(cfg Config) error {
 			return fmt.Errorf("quic_addr/quic_cert_path/quic_key_path are required when use_quic is true")
 		}
 	}
+	if cfg.QuicOnly && !cfg.UseQuic {
+		return fmt.Errorf("quic_only requires use_quic to be true")
+	}
 	if cfg.AuthPassword != "" {
 		if cfg.CookiePass == "" {
 			return fmt.Errorf("cookie_pass is required when auth_password is set")
@@ -248,7 +251,7 @@ Fields:
   use_quic              bool     default true
       Enable HTTP/3 (QUIC) listener.
   quic_only             bool     default false
-      If true, only run HTTP/3 (do not listen HTTP/1-2).
+      If true, only run HTTP/3 (do not listen HTTP/1-2). Requires use_quic.
   quic_addr             string   default ":443"
       HTTP/3 listen address.
   quic_cert_path        string   default "/root/sh/cert.pem"

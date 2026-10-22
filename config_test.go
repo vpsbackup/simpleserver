@@ -173,3 +173,15 @@ func TestNormalizeAgentUpstreamHosts(t *testing.T) {
 		t.Fatal("nil should become empty map")
 	}
 }
+
+func TestLoadConfigQuicOnlyNeedsQuic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "quiconly.json")
+	content := []byte(`{"domain":"x.example.com","use_quic":false,"quic_only":true}`)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadConfig(path); err == nil {
+		t.Fatal("quic_only without use_quic should fail validation")
+	}
+}
