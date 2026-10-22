@@ -25,20 +25,21 @@ type fileMD5Cache struct {
 }
 
 type UploaderService struct {
-	MaxSize     int64
-	MaxMem      int64
-	Curr        int64
-	BasePath    string
-	BaseURL     string
-	JumpBackURL string
-	NameLen     int
-	Expire      time.Duration
-	Lock        sync.Mutex
-	Map         map[string]time.Time
-	md5Mu       sync.Mutex
-	md5Cache    map[string]fileMD5Cache
-	md5WarmMu   sync.Mutex
-	md5Warming  bool
+	MaxSize       int64
+	MaxSingleFile int64
+	Curr          int64
+	Pending       int64
+	BasePath      string
+	BaseURL       string
+	JumpBackURL   string
+	NameLen       int
+	Expire        time.Duration
+	Lock          sync.Mutex
+	Map           map[string]time.Time
+	md5Mu         sync.Mutex
+	md5Cache      map[string]fileMD5Cache
+	md5WarmMu     sync.Mutex
+	md5Warming    bool
 }
 
 func hashFileMD5(path string) (string, error) {
@@ -138,6 +139,55 @@ func (u *UploaderService) warmMD5Cache() {
 }
 
 // WriteFile write reader into file
+// quota accounting (#2): Curr is committed usage, Pending is reserved-but-
+// not-yet-written bytes; effective usage is Curr+Pending. Reserve / commit /
+// release all run under u.Lock, so concurrent uploads cannot race the quota
+// check and the add apart, and a stalled client never holds the lock hostage.
+func (u *UploaderService) reserveUpTo(want int64) int64 {
+	u.Lock.Lock()
+	defer u.Lock.Unlock()
+	can := u.MaxSize - u.Curr - u.Pending
+	if can <= 0 {
+		return 0
+	}
+	if want > can {
+		want = can
+	}
+	u.Pending += want
+	return want
+}
+
+func (u *UploaderService) settleQuota(committed, released int64) {
+	u.Lock.Lock()
+	u.Curr += committed
+	u.Pending -= committed + released
+	if u.Pending < 0 {
+		u.Pending = 0
+	}
+	u.Lock.Unlock()
+}
+
+func (u *UploaderService) releaseQuota(n int64) {
+	u.Lock.Lock()
+	u.Pending -= n
+	if u.Pending < 0 {
+		u.Pending = 0
+	}
+	u.Lock.Unlock()
+}
+
+const uploadChunkBytes int64 = 64 << 10
+
+var (
+	errUploadQuota    = errors.New("upload quota exceeded")
+	errUploadTooLarge = errors.New("file exceeds max_single_file_mb")
+)
+
+// WriteFile stream rc into a new file under BasePath.
+// Bytes are written chunk by chunk, each chunk's quota reserved under u.Lock
+// before the read (#2), and MaxSingleFile (bytes, <=0 = unlimited) caps one
+// file (#3). Any failure removes the file, drops the Map entry and rolls the
+// accounting back (#4); a failed upload never registers into quota.
 func (u *UploaderService) WriteFile(name string, rc io.Reader) (int64, string, error) {
 	ext := filepath.Ext(name)
 	if ext == "" {
@@ -148,26 +198,94 @@ func (u *UploaderService) WriteFile(name string, rc io.Reader) (int64, string, e
 	file, err := os.Create(fn)
 	if err != nil {
 		log.Println("create file name", err, "name", name)
-		return 0, "", err
+		return 0, name, err
 	}
 	defer file.Close()
 	u.Lock.Lock()
-	defer u.Lock.Unlock()
 	u.Map[fn] = time.Now().Add(u.Expire)
-	log.Println("upload file", "file name", fn, "path", u.Map[fn])
+	u.Lock.Unlock()
+
 	hash := md5.New()
-	n, err := io.Copy(io.MultiWriter(file, hash), rc)
-	if err != nil {
-		return n, name, err
+	buf := make([]byte, uploadChunkBytes)
+	var written int64
+	var charged int64
+	var werr error
+	for {
+		// per-file cap (#3): at the cap, one more input byte decides
+		// "exactly at cap" versus "oversize", so cap-sized files stay legal.
+		if u.MaxSingleFile > 0 && written >= u.MaxSingleFile {
+			if got := u.reserveUpTo(1); got == 0 {
+				werr = errUploadQuota
+			} else {
+				var probe [1]byte
+				nr, rerr := io.ReadFull(rc, probe[:])
+				u.releaseQuota(got)
+				if !(nr == 0 && (rerr == io.EOF || rerr == io.ErrUnexpectedEOF)) {
+					werr = errUploadTooLarge
+				}
+			}
+			break
+		}
+		want := uploadChunkBytes
+		if u.MaxSingleFile > 0 && u.MaxSingleFile-written < want {
+			want = u.MaxSingleFile - written
+		}
+		got := u.reserveUpTo(want)
+		if got <= 0 {
+			// no quota left: only a clean end-of-input is still a success
+			var probe [1]byte
+			nr, rerr := io.ReadFull(rc, probe[:1])
+			if !(nr == 0 && (rerr == io.EOF || rerr == io.ErrUnexpectedEOF)) {
+				werr = errUploadQuota
+			}
+			break
+		}
+		nr, rerr := io.ReadFull(rc, buf[:got])
+		if nr > 0 {
+			if _, w2 := file.Write(buf[:nr]); w2 != nil {
+				u.settleQuota(0, got)
+				werr = w2
+				break
+			}
+			hash.Write(buf[:nr])
+			written += int64(nr)
+			charged += int64(nr)
+			u.settleQuota(int64(nr), got-int64(nr))
+		} else {
+			u.releaseQuota(got)
+		}
+		if werr != nil {
+			break
+		}
+		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
+			break
+		}
+		if rerr != nil {
+			werr = rerr
+			break
+		}
+	}
+
+	if werr != nil {
+		os.Remove(fn)
+		u.Lock.Lock()
+		delete(u.Map, fn)
+		u.Curr -= charged
+		if u.Curr < 0 {
+			u.Curr = 0
+		}
+		u.Lock.Unlock()
+		log.Println("upload write error", "name", name, "written", written, "error", werr)
+		return written, name, werr
 	}
 	if info, statErr := file.Stat(); statErr == nil {
 		u.putCachedMD5(name, info.Size(), info.ModTime(), fmt.Sprintf("%x", hash.Sum(nil)))
 	} else {
 		log.Println("stat uploaded file for md5 cache error:", name, statErr)
 	}
-	// Re-scan in background so any other uncached files are filled without blocking the upload response.
+	// Re-scan in background so any other uncached files are filled without blocking.
 	u.scheduleWarmMD5()
-	return n, name, nil
+	return written, name, nil
 }
 
 // UploadedFileInfo is one entry of the upload dir for the manager API.
@@ -250,37 +368,64 @@ func (u *UploaderService) DeleteFile(name string) error {
 
 // Handler return page if get
 // and write file into disk if post
+// Handler return page if get
+// and stream file parts straight into the quota-accounted writer.
+// MultipartReader avoids ParseMultipartForm's memory threshold and the /tmp
+// spill of oversized parts (#3); any failure mid-stream removes the partial
+// file and rolls the accounting back (#4).
 func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		io.WriteString(w, "Not Supported")
 		return
 	}
-	err := r.ParseMultipartForm(u.MaxMem)
+	mr, err := r.MultipartReader()
 	if err != nil {
+		log.Println("parse upload body error:", err)
 		io.WriteString(w, "Read File Error:"+err.Error())
 		return
 	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		log.Println("parse file error:", err)
-		io.WriteString(w, "Read File error:"+err.Error())
+	var uploaded int64
+	var savedName string
+	for {
+		part, perr := mr.NextPart()
+		if perr == io.EOF {
+			break
+		}
+		if perr != nil {
+			if savedName == "" {
+				log.Println("read upload part error:", perr)
+				io.WriteString(w, "Read File Error:"+perr.Error())
+				return
+			}
+			break
+		}
+		if part.FormName() == "file" && part.FileName() != "" && savedName == "" {
+			n, name, werr := u.WriteFile(part.FileName(), part)
+			part.Close()
+			if werr != nil {
+				log.Println("write file", werr)
+				switch {
+				case errors.Is(werr, errUploadQuota):
+					u.Lock.Lock()
+					msg := fmt.Sprintf("Too many write: curr: %d, max: %d", u.Curr, u.MaxSize)
+					u.Lock.Unlock()
+					io.WriteString(w, msg)
+				case errors.Is(werr, errUploadTooLarge):
+					io.WriteString(w, fmt.Sprintf("file too large: max %d MB", u.MaxSingleFile/1024/1024))
+				default:
+					io.WriteString(w, "write file error"+werr.Error())
+				}
+				return
+			}
+			uploaded, savedName = n, name
+			continue
+		}
+		part.Close() // drain every other part so the request body is consumed
+	}
+	if savedName == "" {
+		io.WriteString(w, "Read File error:no file part")
 		return
 	}
-	if u.Curr+header.Size > u.MaxSize {
-		log.Println("too many write", "curr", u.Curr, "size", header.Size, "max size", u.MaxSize)
-		msg := fmt.Sprintf("curr: %d, max: %d", u.Curr, u.MaxSize)
-		io.WriteString(w, "Too many write: "+msg)
-		return
-	}
-	defer file.Close()
-	n, name, err := u.WriteFile(header.Filename, file)
-	if err != nil {
-		log.Println("write file", err)
-		io.WriteString(w, "write file error"+err.Error())
-		return
-	}
-	u.Curr = u.Curr + n
 	show := `<!doctype html>
 <html lang="zh-cmn-Hans">
   <head>
@@ -301,25 +446,31 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
   <body>
     <div class="card">
       <h1>上传成功 ✔</h1>
-      <p>文件访问地址：<a href="` + u.BaseURL + name + `">` + u.BaseURL + name + `</a></p>`
+      <p>文件访问地址：<a href="` + u.BaseURL + savedName + `">` + u.BaseURL + savedName + `</a></p>`
+
 	if u.JumpBackURL != "" {
 		show = show + `      <p>或者返回<a href="` + u.JumpBackURL + `">上传页面</a>继续。</p>`
 	}
 	show = show + `    </div>
   </body>
 </html>`
+
 	if IsCurl(r) {
-		io.WriteString(w, u.BaseURL+name+"\n")
+		io.WriteString(w, u.BaseURL+savedName+"\n")
 	} else {
 		io.WriteString(w, show)
 	}
+	_ = uploaded
 	return
 }
 
+// NewUploadService builds the upload service. maxSize is the per-file cap in
+// bytes (was ParseMultipartForm's memory threshold, see #3/#18); maxTotal is
+// the total quota in bytes, accounted with in-flight reservations included.
 func NewUploadService(baseURL, basePath, jump string, maxSize, maxTotal int64, expire time.Duration, nameLen int) *UploaderService {
 	var u UploaderService
 	u.MaxSize = maxTotal
-	u.MaxMem = maxSize
+	u.MaxSingleFile = maxSize
 	u.BasePath = basePath
 	u.BaseURL = baseURL
 	u.JumpBackURL = jump

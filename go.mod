@@ -1,6 +1,6 @@
 module simpleserver
 
-go 1.24.4
+go 1.27
 
 require (
 	github.com/dilfish/tools/io v1.0.15

@@ -241,7 +241,7 @@ Fields:
   v6_fn                 string   default "v6.txt"
       IPv6 geo database file path.
   max_single_file_mb    int      default 100
-      Max multipart memory / single upload size in MB.
+      Single-file upload size cap in MB (quota counts in-flight files too).
   max_total_file_gb     int      default 10
       Max total uploaded bytes tracked in memory, in GB.
   udp_port              int      default 10081
