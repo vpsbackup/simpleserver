@@ -3,17 +3,21 @@ package main
 import (
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 )
 
 var (
-	errUpstreamMissing   = errors.New("missing x-upstream-base header")
-	errUpstreamInvalid   = errors.New("invalid x-upstream-base")
-	errUpstreamNotHTTPS  = errors.New("upstream must use https")
-	errUpstreamNotAllow  = errors.New("upstream host not allowed")
+	errUpstreamMissing  = errors.New("missing x-upstream-base header")
+	errUpstreamInvalid  = errors.New("invalid x-upstream-base")
+	errUpstreamNotHTTPS = errors.New("upstream must use https")
+	errUpstreamNotAllow = errors.New("upstream host not allowed")
+	errUpstreamPort     = errors.New("upstream port not allowed")
 )
 
 // AgentProxy 转发 OpenAI 兼容接口的请求，解决浏览器跨域问题。
@@ -22,7 +26,7 @@ var (
 // 上游 Host 必须命中 -auh 白名单，且仅允许 https。
 func AgentProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
-		setCORS(w)
+		setCORS(w, r)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -53,7 +57,10 @@ func AgentProxy(w http.ResponseWriter, r *http.Request) {
 	// 移除自定义 header，避免透传到上游
 	r.Header.Del("x-upstream-base")
 
+	// 共享 Transport（review #13）：拨号/TLS 握手/响应头都带超时，上游挂死
+	// 不会无限占住客户端连接；SSE 流式靠 FlushInterval 立即刷新。
 	proxy := httputil.NewSingleHostReverseProxy(u)
+	proxy.Transport = upstreamTransport()
 	proxy.Director = func(req *http.Request) {
 		req.URL.Scheme = u.Scheme
 		req.URL.Host = u.Host
@@ -69,10 +76,10 @@ func AgentProxy(w http.ResponseWriter, r *http.Request) {
 	proxy.FlushInterval = 0 // 立即刷新，支持 SSE 流式输出
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Printf("agentproxy upstream error: %v", err)
-		http.Error(w, "upstream error: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "upstream error", http.StatusBadGateway)
 	}
 
-	setCORS(w)
+	setCORS(w, r)
 	proxy.ServeHTTP(w, r)
 }
 
@@ -101,7 +108,14 @@ func allowedAgentUpstream(u *url.URL) error {
 	if !strings.EqualFold(u.Scheme, "https") {
 		return errUpstreamNotHTTPS
 	}
+	// 只放行 443（显式 :443 与省略端口等价），避免被当作反代跳板（review #13）；
+	// 回环地址豁免，方便本机联调（白名单本来也不该写外网回环）。
 	host := strings.ToLower(u.Hostname())
+	if p := u.Port(); p != "" && p != "443" {
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			return errUpstreamPort
+		}
+	}
 	if host == "" {
 		return errUpstreamInvalid
 	}
@@ -111,8 +125,44 @@ func allowedAgentUpstream(u *url.URL) error {
 	return nil
 }
 
-func setCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+// upstreamTransport returns the shared upstream Transport; tests may swap the
+// package-level agentProxyTransport to inject a fake RoundTripper.
+var agentProxyTransport http.RoundTripper
+var agentTransportOnce sync.Once
+
+func upstreamTransport() http.RoundTripper {
+	if agentProxyTransport != nil {
+		return agentProxyTransport
+	}
+	agentTransportOnce.Do(func() {
+		agentProxyTransport = &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 60 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConnsPerHost:   16,
+		}
+	})
+	return agentProxyTransport
+}
+
+// setCORS reflects same-origin callers instead of wildcard (review #13):
+// agent.html 与本站同源，根本用不到 CORS 头；放开 * 等于让任意第三方页面
+// 借道本机中继。放行本站域名及其子域、本机（localhost / 127.0.0.1）。
+func setCORS(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		if u, err := url.Parse(origin); err == nil {
+			host := strings.ToLower(u.Hostname())
+			site := strings.ToLower(Cfg.Domain)
+			if (site != "" && (host == site || strings.HasSuffix(host, "."+site))) ||
+				host == "localhost" || strings.HasPrefix(host, "127.0.0.1") {
+				w.Header().Add("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+		}
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-upstream-base, HTTP-Referer, X-Title")
 }

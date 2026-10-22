@@ -113,6 +113,12 @@ func InitMux() (*MuxService, error) {
 	// Eagerly build uploader so MD5 cache warm starts at process boot, not first /upload hit.
 	if Cfg.UploadDir != "" {
 		getUploader()
+		// /dl/ 直接指向上传目录并强制下载语义（review #12）。
+		ud := http.Dir(Cfg.UploadDir)
+		mux.Handle("/dl/", dlAttachmentHandler{staticNoDirFS{
+			http.StripPrefix("/dl/", http.FileServer(ud)),
+			ud,
+		}})
 	}
 	mux.HandleFunc("/v1/agentproxy/", AgentProxy)
 	mux.HandleFunc("/login", LoginHandler)

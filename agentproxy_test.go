@@ -74,6 +74,7 @@ func TestAllowedAgentUpstream(t *testing.T) {
 		{name: "allow qiniu", raw: "https://llmapi.qiniu.com/v1", wantErr: nil},
 		{name: "allow case insensitive host", raw: "https://LLMAPI.Qiniu.Com/v1", wantErr: nil},
 		{name: "allow with port", raw: "https://llmapi.qiniu.com:443/v1", wantErr: nil},
+		{name: "reject non-443 port", raw: "https://llmapi.qiniu.com:8443/v1", wantErr: errUpstreamPort},
 		{name: "allow heilovehei subdomain", raw: "https://cn3.heilovehei.com", wantErr: nil},
 		{name: "reject http", raw: "http://llmapi.qiniu.com/v1", wantErr: errUpstreamNotHTTPS},
 		{name: "reject localhost", raw: "https://127.0.0.1/v1", wantErr: errUpstreamNotAllow},
@@ -174,13 +175,16 @@ func TestAgentProxyPathRewriteAndHeaderStrip(t *testing.T) {
 	}
 
 	// Exercise the real handler path with a transport that rewrites https->http to httptest.
-	oldTransport := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	oldTransport := agentProxyTransport
+	if oldTransport == nil {
+		oldTransport = upstreamTransport() // init the real transport first
+	}
+	agentProxyTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		r.URL.Scheme = "http"
 		r.URL.Host = u.Host
 		return oldTransport.RoundTrip(r)
 	})
-	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+	t.Cleanup(func() { agentProxyTransport = oldTransport })
 
 	rr := httptest.NewRecorder()
 	AgentProxy(rr, req)
@@ -206,25 +210,41 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestAgentProxyOptionsCORS(t *testing.T) {
-	req := httptest.NewRequest(http.MethodOptions, "/v1/agentproxy/chat/completions", nil)
-	rr := httptest.NewRecorder()
-	AgentProxy(rr, req)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status=%d", rr.Code)
-	}
-	if rr.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Fatalf("missing CORS origin")
-	}
-}
+	oldDomain := Cfg.Domain
+	t.Cleanup(func() { Cfg.Domain = oldDomain })
 
-func TestAgentHTMLDefaultUpstreamAllowed(t *testing.T) {
-	// 与 config 默认值 / agent.html 默认 apiBase 对齐
-	AgentUpstreamHosts = normalizeAgentUpstreamHosts([]string{"llmapi.qiniu.com", "llmapi.qiniu.io", "heilovehei.com"})
-	u, err := url.Parse("https://cn3.heilovehei.com")
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name   string
+		origin string
+		domain string
+		want   string
+	}{
+		{"no origin", "", "ARM.871116.XYZ", ""},
+		{"same site", "https://ARM.871116.XYZ", "ARM.871116.XYZ", "https://ARM.871116.XYZ"},
+		{"same site subdomain", "https://a.ARM.871116.XYZ", "arm.871116.xyz", "https://a.ARM.871116.XYZ"},
+		{"local", "http://localhost:8080", "ARM.871116.XYZ", "http://localhost:8080"},
+		{"loopback", "http://127.0.0.1:9090", "ARM.871116.XYZ", "http://127.0.0.1:9090"},
+		{"foreign", "https://evil.example.com", "ARM.871116.XYZ", ""},
+		{"foreign site suffix spoof", "https://arm.871116.xyz.evil.com", "ARM.871116.XYZ", ""},
 	}
-	if err := allowedAgentUpstream(u); err != nil {
-		t.Fatalf("agent.html default upstream should be allowed: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			Cfg.Domain = tc.domain
+			req := httptest.NewRequest(http.MethodOptions, "/v1/agentproxy/chat/completions", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			rr := httptest.NewRecorder()
+			AgentProxy(rr, req)
+			if rr.Code != http.StatusNoContent {
+				t.Fatalf("status=%d", rr.Code)
+			}
+			if got := rr.Header().Get("Access-Control-Allow-Origin"); got != tc.want {
+				t.Fatalf("ACAO=%q want %q", got, tc.want)
+			}
+			if got := rr.Header().Get("Vary"); tc.want != "" && got != "Origin" {
+				t.Fatalf("Vary=%q want Origin", got)
+			}
+		})
 	}
 }

@@ -45,3 +45,24 @@ func (s staticNoDirFS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	http.ServeContent(w, r, "index.html", st.ModTime(), f)
 }
+
+// dlAttachmentHandler 把 /dl/ 的响应强制成"下载"语义（review #12）：
+// 上传的 .html/.svg 只会被另存，不会在本站源里执行脚本——
+// 配合 nosniff 挡掉内容嗅探，存储型 XSS 的执行面就没了。
+type dlAttachmentHandler struct {
+	inner http.Handler
+}
+
+func (h dlAttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if !strings.HasSuffix(r.URL.Path, "/") {
+		name := strings.Map(func(c rune) rune {
+			if c < 0x20 || c == '"' {
+				return '_'
+			}
+			return c
+		}, path.Base(r.URL.Path))
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
+	}
+	h.inner.ServeHTTP(w, r)
+}
