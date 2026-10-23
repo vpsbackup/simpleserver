@@ -67,6 +67,11 @@ func (s *MuxService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-HTTP3-Enable", "false")
 	}
 	log.Println("request proto is:", r.Proto)
+	if !originAllowed(r) {
+		log.Println("cross-origin request rejected:", r.Method, r.URL.Path)
+		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+		return
+	}
 	if needsAuth(r) && !Authorized(r) {
 		rejectUnauthorized(w, r)
 		return

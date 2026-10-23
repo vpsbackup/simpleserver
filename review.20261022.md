@@ -7,13 +7,41 @@
   **未鉴权端点的放大能力**、以及**日志无限增长**。本轮先修了最影响可用性的两项（#1、#5），
   另外修了一个测试暴露出来的缓存竞争 bug。
 后续跟进：`50054c1` 修复 #2/#3/#4，`dcff4dd` 修复 #12/#13，2026-10-22 晚间再修复 #6 与 #8
-  （详见下文各条），`simpleserver.gz` 残留文件已删除（#26）。
+  （详见下文各条），`f63dbff` 修复 #15，2026-10-23 修复 #10 与 #11，
+  `simpleserver.gz` 残留文件已删除（#26）。
 
 状态说明：✅ 已修复；⬜ 待处理。
 
 ---
 
 ## 一、本轮已修复
+
+### ✅ #10 登录失败退避 + 写操作 Origin 校验（2026-10-23）
+
+位置：`auth.go`、`cmux.go`
+
+修复：
+
+- 新增 `loginGuard`：按客户端 IP 统计连续失败次数，前 5 次正常提示，第 6 次起
+  锁定 30s 并按次翻倍，封顶 15 分钟；锁定期内即使密码正确也返回 429 +
+  `Retry-After`；登录成功清零计数；空闲 1 小时的条目自动回收；
+- IP 取自 `X-Real-Ip`（`cmux` 在直连时会用 `RemoteAddr` 覆盖，无法伪造），
+  回退到 `RemoteAddr`；
+- 新增 `originAllowed`：非 GET/HEAD/OPTIONS 请求若带 `Origin`，其 host 必须等于
+  `r.Host` 或 `Cfg.Domain`；`Sec-Fetch-Site: cross-site` 一律拒绝；无 `Origin`
+  的 curl / API 调用不受影响。校验统一在 `MuxService.ServeHTTP` 入口执行，
+  新增写路由自动获得保护。
+
+### ✅ #11 `needsAuth` 改为默认拒绝（2026-10-23）
+
+位置：`auth.go`
+
+修复：GET/HEAD/OPTIONS 默认公开，只有 `protectedReadPath`（`/api/files/`、
+`/tracer`）需要登录；其余方法默认需要鉴权，只有 `publicWritePath` 显式列出的
+`/login`、`/logout` 放行；`/v1/agentproxy/` 仍按原逻辑（除 OPTIONS 外全保护）。
+新增 `TestNeedsAuthDefaultsToDenyWrites`、`TestLoginFailureBackoff`、
+`TestLoginBackoffExpiresAndResets`、`TestOriginAllowed`、
+`TestMuxRejectsCrossOriginWrite`。
 
 ### ✅ #2/#3/#4 上传链路：配额、流式落盘与失败清理（`50054c1`）
 
@@ -153,7 +181,7 @@
 
 建议：用 `redactHeaders` 过滤敏感头；模板启动时解析一次（或 `//go:embed`）。
 
-#### ⬜ #10 登录没有失败限速
+#### ✅ #10 登录没有失败限速（已修复，见第一节）
 
 位置：`auth.go` `LoginHandler`
 
@@ -162,7 +190,7 @@ POST 全靠 `SameSite=Lax` 挡 CSRF。
 
 建议：按 IP 做失败退避/锁定；写操作统一校验 `Origin`。
 
-#### ⬜ #11 `needsAuth` 是白名单，新增路由默认无保护
+#### ✅ #11 `needsAuth` 是白名单，新增路由默认无保护（已修复，见第一节）
 
 位置：`auth.go` `needsAuth`
 
@@ -199,14 +227,15 @@ CORS 为 `*`。
 
 建议：加 limit/skip 与总数、建索引；路径解析统一用 `r.URL.Path`（与 memfile 修复一致）。
 
-#### ⬜ #15 Mongo 查询没有超时
+#### ✅ #15 Mongo 查询没有超时（已修复）
 
 位置：`mongo.go`
 
 `Find` / `FindSort` / `Del` 都用 `context.Background()`，Mongo 一慢就挂死 handler。
 `mongo.NewClient` + `client.Connect` 在驱动 1.17 已废弃。
 
-建议：统一 `context.WithTimeout`（或透传 `r.Context()`），改用 `mongo.Connect` + `Ping`。
+已修复（`f63dbff`）：连接改为 `mongo.Connect` + `Ping`（5s），每个操作
+`context.WithTimeout`（`mongoOpTimeout` = 3s），慢查询不再无限占用 handler。
 
 #### ⬜ #16 日志量是当前最大的运维风险
 
@@ -279,7 +308,7 @@ GOOS=linux GOARCH=amd64 build  OK
 ## 四、建议的后续顺序
 
 1. ~~#2 + #3 + #4 + #6：上传链路~~（✅ 已完成）
-2. #11 + #7：鉴权默认拒绝、DNS resolver 白名单——都是小改动、收益直接；
-3. #16 + #8：日志收敛与轮转、healthz 缓存——~~healthz 缓存~~（✅ 已完成），剩 #16 日志收敛；
+2. ~~#11 + #10：鉴权默认拒绝、登录失败退避与 Origin 校验~~（✅ 已完成），剩 #7 DNS resolver 白名单；
+3. #16：日志收敛；
 4. #17 + #18：模板外置 + 配置项拆分，为后续改 UI 铺路；
 5. #19–#28：随日常维护逐步清理，优先补 CI 与 systemd。

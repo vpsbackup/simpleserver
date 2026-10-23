@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dnet "github.com/dilfish/tools/net"
@@ -130,26 +132,51 @@ func Authorized(r *http.Request) bool {
 	return cookieAuthorized(r) || bearerPasswordOK(r)
 }
 
+// needsAuth defaults to deny: every non-idempotent method needs a login unless
+// the path is an explicit public exception. Read-only requests stay public so
+// the site, the status page and the health probe keep working anonymously.
+// This replaces the old allow-list, where a new POST route was unprotected
+// until someone remembered to register it (review #11).
 func needsAuth(r *http.Request) bool {
 	if !authEnabled() {
 		return false
 	}
 	path := r.URL.Path
-	switch {
-	case r.Method == http.MethodPost && path == "/upload":
-		return true
-	case r.Method == http.MethodPost && path == "/t":
-		return true
-	case r.Method == http.MethodPost && path == "/api/t":
-		return true
-	case r.Method == http.MethodPost && path == "/api/t/delete":
-		return true
-	case r.Method == http.MethodGet && path == "/api/files/list":
-		return true
-	case r.Method == http.MethodPost && path == "/api/files/delete":
-		return true
-	case strings.HasPrefix(path, "/v1/agentproxy/"):
+
+	// The proxy forwards credentials upstream, so every method is protected;
+	// only the CORS preflight is public.
+	if strings.HasPrefix(path, "/v1/agentproxy/") {
 		return r.Method != http.MethodOptions
+	}
+
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return protectedReadPath(path)
+	default:
+		return !publicWritePath(path)
+	}
+}
+
+// protectedReadPath lists the read-only endpoints that still expose private
+// data (file names/sizes, future trace snapshots) and therefore need a login.
+func protectedReadPath(path string) bool {
+	switch {
+	case path == "/api/files/list", strings.HasPrefix(path, "/api/files/"):
+		return true
+	case path == "/tracer":
+		return true
+	default:
+		return false
+	}
+}
+
+// publicWritePath is the explicit exception list for non-GET requests.
+// /login must stay public (it is how a session is created) and /logout only
+// expires a cookie, so it is harmless without a session.
+func publicWritePath(path string) bool {
+	switch path {
+	case "/login", "/logout":
+		return true
 	default:
 		return false
 	}
@@ -163,6 +190,159 @@ func rejectUnauthorized(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "unauthorized: login at /dilfish.html first", http.StatusUnauthorized)
+}
+
+// --- login failure backoff (review #10) ---
+
+const (
+	// loginFailFree is how many consecutive failures are answered normally
+	// before locking starts, so a user who mistypes a couple of times is fine.
+	loginFailFree = 5
+	// loginLockBase doubles per extra failure up to loginLockMax.
+	loginLockBase       = 30 * time.Second
+	loginLockMax        = 15 * time.Minute
+	loginAttemptIdleTTL = time.Hour
+)
+
+type loginAttempt struct {
+	fails       int
+	lockedUntil time.Time
+	lastSeen    time.Time
+}
+
+type loginGuard struct {
+	mu      sync.Mutex
+	entries map[string]*loginAttempt
+	now     func() time.Time
+}
+
+func newLoginGuard() *loginGuard {
+	return &loginGuard{entries: make(map[string]*loginAttempt), now: time.Now}
+}
+
+var loginLimiter = newLoginGuard()
+
+// retryAfter reports how long the caller must wait before another attempt.
+func (g *loginGuard) retryAfter(key string) time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	a := g.entries[key]
+	if a == nil {
+		return 0
+	}
+	if d := a.lockedUntil.Sub(g.now()); d > 0 {
+		return d
+	}
+	return 0
+}
+
+// fail records one failed attempt and returns the lock duration (0 when the
+// caller may retry immediately) plus the consecutive failure count.
+func (g *loginGuard) fail(key string) (time.Duration, int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.now()
+	g.gcLocked(now)
+	a := g.entries[key]
+	if a == nil {
+		a = &loginAttempt{}
+		g.entries[key] = a
+	}
+	a.fails++
+	a.lastSeen = now
+	if a.fails <= loginFailFree {
+		return 0, a.fails
+	}
+	lock := loginLockBase
+	for n := a.fails - loginFailFree; n > 1 && lock < loginLockMax; n-- {
+		lock *= 2
+	}
+	if lock > loginLockMax {
+		lock = loginLockMax
+	}
+	a.lockedUntil = now.Add(lock)
+	return lock, a.fails
+}
+
+// succeed drops the failure history so a valid password resets the backoff.
+func (g *loginGuard) succeed(key string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.entries, key)
+}
+
+// gcLocked drops idle entries so a stream of unique source addresses cannot
+// grow the map forever.
+func (g *loginGuard) gcLocked(now time.Time) {
+	for k, a := range g.entries {
+		if now.Sub(a.lastSeen) > loginAttemptIdleTTL && !now.Before(a.lockedUntil) {
+			delete(g.entries, k)
+		}
+	}
+}
+
+// clientIP prefers the address set by the front proxy in ServeHTTP. Behind
+// nginx X-Real-Ip is trusted; when the server faces the internet directly,
+// cmux overwrites X-Real-Ip with RemoteAddr, so it cannot be spoofed.
+func clientIP(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("X-Real-Ip")); v != "" {
+		return v
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// originAllowed rejects state-changing requests that a browser marks as
+// coming from another site (review #10: SameSite=Lax alone is not enough).
+// Non-browser clients (curl, API integrations) send no Origin and keep working.
+func originAllowed(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	originHost := hostWithoutPort(u.Host)
+	for _, candidate := range []string{r.Host, r.Header.Get("X-Forwarded-Host"), Cfg.Domain} {
+		if candidate != "" && originHost == hostWithoutPort(candidate) {
+			return true
+		}
+	}
+	// A reverse proxy that does not preserve Host leaves a loopback/private
+	// address here, so comparing hosts would reject every legitimate login.
+	// Fall back to the browser signal we already checked above.
+	if isInternalHost(r.Host) {
+		return true
+	}
+	return false
+}
+
+func isInternalHost(h string) bool {
+	host := hostWithoutPort(h)
+	if host == "" || host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified())
+}
+
+func hostWithoutPort(h string) string {
+	h = strings.ToLower(strings.TrimSpace(h))
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	return strings.Trim(h, "[]")
 }
 
 // DilfishHandler is the obscure login page at /dilfish.html.
@@ -483,21 +663,43 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dilfish.html", http.StatusFound)
 		return
 	}
+	ip := clientIP(r)
+	if wait := loginLimiter.retryAfter(ip); wait > 0 {
+		log.Println("login blocked from", ip, "retry after", wait)
+		retryAfterHeader(w, wait)
+		http.Error(w, "too many login attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/dilfish.html?err="+htmlQuery("bad form"), http.StatusFound)
 		return
 	}
 	if !passwordMatch(r.FormValue("password")) {
-		log.Println("login failed from", r.RemoteAddr)
+		lock, fails := loginLimiter.fail(ip)
+		log.Println("login failed from", ip, "attempt", fails)
+		if lock > 0 {
+			retryAfterHeader(w, lock)
+			http.Error(w, "too many login attempts, try again later", http.StatusTooManyRequests)
+			return
+		}
 		http.Redirect(w, r, "/dilfish.html?err="+htmlQuery("password incorrect"), http.StatusFound)
 		return
 	}
+	loginLimiter.succeed(ip)
 	setAuthCookie(w, r)
 	next := r.FormValue("next")
 	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
 		next = "/dilfish.html"
 	}
 	http.Redirect(w, r, next, http.StatusFound)
+}
+
+func retryAfterHeader(w http.ResponseWriter, d time.Duration) {
+	secs := int64((d + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
 }
 
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
