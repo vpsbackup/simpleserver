@@ -763,14 +763,20 @@
   }
 
   function escapeHtml(text) {
-    const escTxt = esc(text);
-    // inline code
-    let html = escTxt.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // code blocks
-    html = html.replace(/```([\s\S]*?)```/g, function (m, code) {
-      return '<pre><code>' + code + '</code></pre>';
+    // 先把围栏代码块抽成占位符：行内 code 的正则会把 ``` 的前两个反引号吃掉，
+    // 顺序反了就永远命中不了 <pre> 分支（历史 bug）。占位符不含 & < > " ，过 esc 不会被破坏。
+    const blocks = [];
+    const src = String(text).replace(/```([\s\S]*?)```/g, function (m, body) {
+      // 去掉紧跟 ``` 的语言标记行（```js / ```python），再削掉首尾空行
+      body = body.replace(/^[ \t]*[A-Za-z0-9_+#.\-]*[ \t]*\r?\n/, '');
+      body = body.replace(/^\n+/, '').replace(/\n+$/, '');
+      blocks.push(esc(body));
+      return '\u0000cb' + (blocks.length - 1) + '\u0000';
     });
-    return html;
+    const html = esc(src).replace(/`([^`]+)`/g, '<code>$1</code>');
+    return html.replace(/\u0000cb(\d+)\u0000/g, function (m, i) {
+      return '<pre><code>' + blocks[+i] + '</code></pre>';
+    });
   }
 
   function uid() {
@@ -861,7 +867,7 @@
       return;
     }
     conv.messages.forEach((m) => {
-      $messages.appendChild(messageNode(m.role, m.content, m.reasoning, m.ts));
+      $messages.appendChild(messageNode(m));
     });
     scrollToBottom();
   }
@@ -877,7 +883,10 @@
     return div;
   }
 
-  function messageNode(role, content, reasoning, ts) {
+  function messageNode(m) {
+    const role = m.role;
+    const reasoning = m.reasoning;
+    const ts = m.ts;
     const div = document.createElement('div');
     div.className = 'msg ' + role;
     const avatar = document.createElement('div');
@@ -900,7 +909,18 @@
     }
     const text = document.createElement('div');
     text.className = 'msg-text';
-    text.innerHTML = escapeHtml(content) || '…';
+    // 状态从消息数据渲染，重渲染/刷新后都还在（旧实现只写 DOM，会被 finally 的 renderMessages 擦掉）
+    if (m.content) {
+      text.innerHTML = escapeHtml(m.content);
+    } else if (m.error) {
+      text.innerHTML = '<span style="color:#dc2626">请求失败：' + esc(m.error) + '</span>';
+    } else if (m.stopped) {
+      text.innerHTML = '<span style="color:var(--text-dim)">（已停止）</span>';
+    } else if (m.empty) {
+      text.innerHTML = '<span style="color:var(--text-dim)">（无回复）</span>';
+    } else {
+      text.innerHTML = '<span style="color:var(--text-dim)">…</span>';
+    }
     contentDiv.appendChild(text);
     // 准确时间点：本地时间，无 ts 的老数据不显示
     const timeLabel = fmtMsgTime(ts);
@@ -1187,25 +1207,25 @@
               textDiv.textContent = assistantMsg.content;
               scrollToBottom();
             }
-          } catch (e) { /* ignore partial lines */ }
+          } catch (e) {
+            // 只吞掉不完整的 SSE 行（JSON 解析失败）；业务错误必须抛给外层 catch
+            if (!(e instanceof SyntaxError)) throw e;
+          }
         }
       }
 
       stopBtn.remove();
-      if (!assistantMsg.content) {
-        textDiv.innerHTML = '<span style="color:var(--text-dim)">（无回复）</span>';
+      if (!assistantMsg.content && !assistantMsg.reasoning) {
+        assistantMsg.empty = true;
       }
     } catch (err) {
       stopBtn.remove();
+      // 状态写进消息数据，而不是只写 DOM：finally 里的 renderMessages() 会用数据重建列表，
+      // 只写在 DOM 上的错误提示会在同一 tick 被擦成「…」
       if (err.name === 'AbortError') {
-        if (assistantMsg.content) {
-          textDiv.textContent = assistantMsg.content;
-        } else {
-          textDiv.innerHTML = '<span style="color:var(--text-dim)">（已停止）</span>';
-        }
+        if (!assistantMsg.content) assistantMsg.stopped = true;
       } else {
-        textDiv.textContent = '';
-        textDiv.innerHTML = '<span style="color:#dc2626">请求失败：' + esc(err.message) + '</span>';
+        assistantMsg.error = err.message || String(err);
       }
     } finally {
       streaming = false;
