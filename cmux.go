@@ -123,6 +123,7 @@ func InitMux() (*MuxService, error) {
 		mux.Handle("/dl/", dlAttachmentHandler{staticNoDirFS{
 			http.StripPrefix("/dl/", http.FileServer(ud)),
 			ud,
+			"/dl/",
 		}})
 	}
 	mux.HandleFunc("/v1/agentproxy/", AgentProxy)
@@ -147,7 +148,7 @@ func InitMux() (*MuxService, error) {
 	// staticNoDirFS: serve files but never list directories (index.html only),
 	// so dirs like the upload dir /dl/ are not browsable by anonymous visitors.
 	fs := http.Dir(staticDir)
-	mux.Handle("/", staticNoDirFS{http.FileServer(fs), fs})
+	mux.Handle("/", staticNoDirFS{http.FileServer(fs), fs, ""})
 
 	return &mux, nil
 }

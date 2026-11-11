@@ -36,7 +36,7 @@ func newStaticTestDir(t *testing.T) string {
 func TestStaticNoDirFS(t *testing.T) {
 	root := newStaticTestDir(t)
 	fs := http.Dir(root)
-	srv := httptest.NewServer(staticNoDirFS{http.FileServer(fs), fs})
+	srv := httptest.NewServer(staticNoDirFS{http.FileServer(fs), fs, ""})
 	defer srv.Close()
 
 	cases := []struct {
@@ -80,5 +80,59 @@ func TestStaticNoDirFS(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode == 200 {
 		t.Error("GET /empty should not serve a listing")
+	}
+}
+
+// TestStaticNoDirFSPrefixedMount covers the /dl/ shape: the inner FileServer is
+// mounted behind http.StripPrefix, so the request path still carries "/dl/"
+// while the filesystem below it does not. The index lookup must happen below
+// the mount, otherwise /dl/<dir>/ looks for dl/<dir>/index.html and every
+// upload subdirectory with an index.html answers 404.
+func TestStaticNoDirFSPrefixedMount(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("withindex/index.html", "sub-index")
+	write("empty/f.txt", "file-content")
+
+	fs := http.Dir(root)
+	srv := httptest.NewServer(staticNoDirFS{
+		http.StripPrefix("/dl/", http.FileServer(fs)), fs, "/dl/",
+	})
+	defer srv.Close()
+
+	cases := []struct {
+		path string
+		code int
+		body string
+	}{
+		{"/dl/withindex/", 200, "sub-index"},
+		{"/dl/empty/", 404, ""},
+		{"/dl/empty/f.txt", 200, "file-content"},
+		{"/dl/nope.txt", 404, ""},
+		// the mount root has no index.html: still no listing
+		{"/dl/", 404, ""},
+	}
+	for _, c := range cases {
+		resp, err := http.Get(srv.URL + c.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", c.path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != c.code {
+			t.Errorf("GET %s = %d, want %d", c.path, resp.StatusCode, c.code)
+			continue
+		}
+		if c.body != "" && !strings.Contains(string(body), c.body) {
+			t.Errorf("GET %s body missing %q", c.path, c.body)
+		}
 	}
 }

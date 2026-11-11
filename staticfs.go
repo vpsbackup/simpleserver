@@ -16,12 +16,17 @@ import (
 //   - a directory request without an index.html returns 404;
 //   - regular file requests (e.g. /dl/<random>.txt) pass through untouched.
 //
+// The wrapped handler is normally mounted with http.StripPrefix, so the request
+// path still carries the mount prefix while fs paths do not: prefix names that
+// mount ("/dl/", empty for a root mount) and the index lookup happens below it.
+//
 // Note: index files are served with http.ServeContent rather than the
 // wrapped FileServer, because the FileServer redirects /index.html back to
 // "./" which would loop with the rewrite below.
 type staticNoDirFS struct {
 	handler http.Handler // the wrapped http.FileServer
 	fs      http.FileSystem
+	prefix  string // URL prefix of the mount, e.g. "/dl/"; "" when mounted at /
 }
 
 func (s staticNoDirFS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +36,11 @@ func (s staticNoDirFS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// directory request: only serve it when an index.html exists, otherwise
 	// answer 404 instead of letting the FileServer render a listing.
-	idx := path.Join(path.Clean(r.URL.Path), "index.html")
+	rel := strings.TrimPrefix(r.URL.Path, s.prefix)
+	if !strings.HasPrefix(rel, "/") {
+		rel = "/" + rel
+	}
+	idx := path.Join(path.Clean(rel), "index.html")
 	f, err := s.fs.Open(idx)
 	if err != nil {
 		http.NotFound(w, r)
