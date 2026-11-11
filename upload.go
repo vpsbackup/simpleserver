@@ -72,6 +72,31 @@ func ApiFilesDelete(w http.ResponseWriter, r *http.Request) {
 	writeJson(w, map[string]interface{}{"ok": true})
 }
 
+// ApiFilesUpload store one multipart file and answer with its on-disk name.
+// post only. Same auth, quota, per-file cap and failure cleanup as /upload,
+// but the response is machine readable so a client can keep the name and use
+// it later for /dl/<name> or /api/files/delete. Always json, no Accept
+// negotiation: a client that wants the name gets it or gets a plain error.
+func ApiFilesUpload(w http.ResponseWriter, r *http.Request) {
+	log.Println("request is:", r.Method, r.RequestURI)
+	if r.Method != http.MethodPost {
+		http.Error(w, "bad method for file upload", http.StatusMethodNotAllowed)
+		return
+	}
+	u := getUploader()
+	size, name, err := u.writeMultipartFile(r)
+	if err != nil {
+		uploadErrorToHTTP(w, err)
+		return
+	}
+	writeJson(w, map[string]interface{}{
+		"ok":   true,
+		"name": name,
+		"url":  u.BaseURL + name,
+		"size": size,
+	})
+}
+
 func Uploader(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		if IsCurl(r) {

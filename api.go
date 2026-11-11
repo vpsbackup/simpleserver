@@ -34,6 +34,12 @@ func ApiHandler(w http.ResponseWriter, r *http.Request) {
 			ApiFilesList(w, r)
 			return
 		}
+	// Delegated for every method so the handler itself owns the 405 answer;
+	// a method check here would make that branch unreachable and turn a bad
+	// method into "bad api request name" with a 200.
+	case "files/upload":
+		ApiFilesUpload(w, r)
+		return
 	case "files/delete":
 		if r.Method == http.MethodPost {
 			ApiFilesDelete(w, r)

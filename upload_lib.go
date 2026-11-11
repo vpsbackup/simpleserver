@@ -179,8 +179,10 @@ func (u *UploaderService) releaseQuota(n int64) {
 const uploadChunkBytes int64 = 64 << 10
 
 var (
-	errUploadQuota    = errors.New("upload quota exceeded")
-	errUploadTooLarge = errors.New("file exceeds max_single_file_mb")
+	errUploadQuota        = errors.New("upload quota exceeded")
+	errUploadTooLarge     = errors.New("file exceeds max_single_file_mb")
+	errUploadBadMultipart = errors.New("bad upload request")
+	errUploadNoFilePart   = errors.New("no file part")
 )
 
 // WriteFile stream rc into a new file under BasePath.
@@ -366,23 +368,23 @@ func (u *UploaderService) DeleteFile(name string) error {
 	return nil
 }
 
-// Handler return page if get
-// and write file into disk if post
-// Handler return page if get
-// and stream file parts straight into the quota-accounted writer.
+// writeMultipartFile streams the first "file" part of a multipart request into
+// the quota-accounted WriteFile and drains every other part, so the request
+// body is always consumed. Shared by /upload and /api/files/upload so the
+// quota, per-file cap and failure cleanup only exist once.
+//
 // MultipartReader avoids ParseMultipartForm's memory threshold and the /tmp
 // spill of oversized parts (#3); any failure mid-stream removes the partial
 // file and rolls the accounting back (#4).
-func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Not Supported", http.StatusMethodNotAllowed)
-		return
-	}
+//
+// A part read error after a file was already stored is not a failure: the
+// upload is complete and only the trailing bytes of the request are missing.
+// /upload has always answered that case with success, and this keeps it.
+func (u *UploaderService) writeMultipartFile(r *http.Request) (int64, string, error) {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		log.Println("parse upload body error:", err)
-		http.Error(w, "bad upload request", http.StatusBadRequest)
-		return
+		return 0, "", errUploadBadMultipart
 	}
 	var uploaded int64
 	var savedName string
@@ -394,8 +396,7 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 		if perr != nil {
 			if savedName == "" {
 				log.Println("read upload part error:", perr)
-				http.Error(w, "bad upload request", http.StatusBadRequest)
-				return
+				return 0, "", errUploadBadMultipart
 			}
 			break
 		}
@@ -404,16 +405,7 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			if werr != nil {
 				log.Println("write file", werr)
-				switch {
-				case errors.Is(werr, errUploadQuota):
-					// fixed text: do not echo internal counters or paths (#6)
-					http.Error(w, "upload quota exceeded", http.StatusRequestEntityTooLarge)
-				case errors.Is(werr, errUploadTooLarge):
-					http.Error(w, "file exceeds per-file size limit", http.StatusRequestEntityTooLarge)
-				default:
-					http.Error(w, "upload failed", http.StatusInternalServerError)
-				}
-				return
+				return 0, "", werr
 			}
 			uploaded, savedName = n, name
 			continue
@@ -421,7 +413,39 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 		part.Close() // drain every other part so the request body is consumed
 	}
 	if savedName == "" {
+		return 0, "", errUploadNoFilePart
+	}
+	return uploaded, savedName, nil
+}
+
+// uploadErrorToHTTP maps a writeMultipartFile error onto the upload responses
+// that /upload has always returned, text and status included.
+func uploadErrorToHTTP(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errUploadQuota):
+		// fixed text: do not echo internal counters or paths (#6)
+		http.Error(w, "upload quota exceeded", http.StatusRequestEntityTooLarge)
+	case errors.Is(err, errUploadTooLarge):
+		http.Error(w, "file exceeds per-file size limit", http.StatusRequestEntityTooLarge)
+	case errors.Is(err, errUploadBadMultipart):
+		http.Error(w, "bad upload request", http.StatusBadRequest)
+	case errors.Is(err, errUploadNoFilePart):
 		http.Error(w, "no file part", http.StatusBadRequest)
+	default:
+		http.Error(w, "upload failed", http.StatusInternalServerError)
+	}
+}
+
+// Handler answers POST with the success page (curl gets the bare URL instead)
+// and rejects every other method.
+func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Not Supported", http.StatusMethodNotAllowed)
+		return
+	}
+	_, savedName, err := u.writeMultipartFile(r)
+	if err != nil {
+		uploadErrorToHTTP(w, err)
 		return
 	}
 	show := `<!doctype html>
@@ -458,8 +482,6 @@ func (u *UploaderService) Handler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		io.WriteString(w, show)
 	}
-	_ = uploaded
-	return
 }
 
 // NewUploadService builds the upload service. maxSize is the per-file cap in
