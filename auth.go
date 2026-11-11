@@ -161,7 +161,9 @@ func needsAuth(r *http.Request) bool {
 // data (file names/sizes, future trace snapshots) and therefore need a login.
 func protectedReadPath(path string) bool {
 	switch {
-	case path == "/api/files/list", strings.HasPrefix(path, "/api/files/"):
+	// The whole prefix is private: /api/files/list, delete and upload all expose
+	// or mutate upload state, so matching the prefix is what protects them.
+	case strings.HasPrefix(path, "/api/files/"):
 		return true
 	case path == "/tracer":
 		return true

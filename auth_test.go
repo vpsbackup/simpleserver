@@ -61,6 +61,10 @@ func TestNeedsAuthPaths(t *testing.T) {
 		{"GET", "/v1/agentproxy/models", true},
 		{"OPTIONS", "/v1/agentproxy/chat/completions", false},
 		{"GET", "/api/files/list", true},
+		// prefix-only path: pins the /api/files/ rule itself, not just the
+		// single endpoint that also matched the old equality check
+		{"GET", "/api/files/upload", true},
+		{"GET", "/api/files/", true},
 		{"GET", "/vnstat", false},
 		{"GET", "/", false},
 	}
