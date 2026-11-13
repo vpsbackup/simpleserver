@@ -7,8 +7,8 @@ import (
 	"net/http"
 )
 
-// 100m
-var MaxHTTPPayload = int64(100 * 1024 * 1024)
+// 200m
+var MaxHTTPPayload = int64(200 * 1024 * 1024)
 
 // 10g
 var MaxTotalFileSize = int64(10 * 1024 * 1024 * 1024)
