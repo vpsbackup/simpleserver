@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -55,12 +56,18 @@ func (s staticNoDirFS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "index.html", st.ModTime(), f)
 }
 
-// dlAttachmentHandler 把 /dl/ 的响应强制成"下载"语义（review #12）：
-// 上传的 .html/.svg 只会被另存，不会在本站源里执行脚本——
-// 配合 nosniff 挡掉内容嗅探，存储型 XSS 的执行面就没了。
+// dlAttachmentHandler 决定 /dl/ 的呈现语义：能安全内联展示的类型（位图、
+// 视频、音频）用 Content-Disposition: inline，点击即在浏览器里打开；
+// html/svg 和一切未知类型仍强制 attachment（review #12）：上传的
+// .html/.svg 只会被另存，不会在本站源里执行脚本——配合 nosniff 挡掉
+// 内容嗅探，存储型 XSS 的执行面就没了。svg 能跑脚本、pdf 能内嵌 JS，
+// 所以都不在 inline 名单里。
 type dlAttachmentHandler struct {
 	inner http.Handler
 }
+
+// inlineExtRe 匹配可在浏览器里直接渲染的扩展名。
+var inlineExtRe = regexp.MustCompile(`(?i)\.(jpe?g|png|gif|webp|bmp|ico|mp4|webm|mov|avi|mkv|mp3|m4a|aac|ogg|flac|wav)$`)
 
 func (h dlAttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -71,7 +78,11 @@ func (h dlAttachmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return c
 		}, path.Base(r.URL.Path))
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
+		disposition := "attachment"
+		if inlineExtRe.MatchString(name) {
+			disposition = "inline"
+		}
+		w.Header().Set("Content-Disposition", disposition+"; filename=\""+name+"\"")
 	}
 	h.inner.ServeHTTP(w, r)
 }
